@@ -1,0 +1,31 @@
+# Galaxia — configuration Caddy de la galaxie mère
+#
+# Les vhosts ci-dessous sont commentés tant que le DNS de galaxia-os.com
+# n'est pas propagé vers 188.34.188.200 — Let's Encrypt échouerait à
+# émettre les certificats. Décommenter et `sudo systemctl reload caddy`
+# une fois la propagation confirmée (dig app.galaxia-os.com → 188.34.188.200).
+
+# app.galaxia-os.com {
+# 	# Application principale Galaxia (interface utilisateur)
+# 	reverse_proxy localhost:3000
+# }
+
+# updates.galaxia-os.com {
+# 	# Endpoint des mises à jour pour les galaxies filles
+# 	reverse_proxy localhost:8081
+# }
+
+# install.galaxia-os.com {
+# 	# Script d'installation public (curl | bash style)
+# 	root * /var/www/install
+# 	file_server
+# }
+
+# docs.galaxia-os.com {
+# 	# Documentation produit
+# 	root * /var/www/docs
+# 	file_server
+# }
+
+# En attendant la propagation DNS, on conserve la config Caddy par défaut
+# (servie via /etc/caddy/Caddyfile installé par le paquet).

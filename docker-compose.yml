@@ -1,0 +1,28 @@
+# Galaxia — orchestration de la galaxie mère
+#
+# Ce fichier est volontairement minimal pour l'instant. Les services
+# OpenClaw, NemoClaw et l'intégration Ollama seront ajoutés au fur et
+# à mesure que chaque brique est intégrée. Caddy est exécuté en service
+# système (apt) sur la galaxie mère, mais sera containerisé pour les
+# galaxies filles afin de garantir la reproductibilité.
+
+services:
+  # placeholder — sera renseigné lors de l'intégration d'OpenClaw
+  # openclaw:
+  #   image: openclaw/openclaw:latest
+  #   restart: unless-stopped
+  #   depends_on: [ollama]
+
+  # placeholder — NemoClaw (couche sécurité NVIDIA enterprise)
+  # nemoclaw:
+  #   image: nemoclaw/nemoclaw:latest
+  #   restart: unless-stopped
+  #   depends_on: [openclaw]
+
+  # Ollama tourne déjà en service système (apt) — pas containerisé
+  # pour la galaxie mère ; sera containerisé pour les galaxies filles.
+  noop:
+    image: alpine:3
+    command: ["sh", "-c", "echo Galaxia compose stack placeholder; sleep infinity"]
+    restart: "no"
+    profiles: ["never"]
