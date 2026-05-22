@@ -74,44 +74,31 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK
 | 7   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Pas commencé                                                   |
 | 8   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (A/B/C)                                |
 
-## ⚠️ Préoccupation : vérification de la chaîne d'origine NemoClaw
+## Vérification de la chaîne d'origine NemoClaw (2026-05-22)
 
-La session précédente (galaxia user, 2026-05-21) a accepté ces faits comme vérifiés
-dans la mémoire `project_stack_openclaw_nemoclaw.md` :
+**Résolu :** la chaîne d'origine est légitime. Détail de la vérif :
 
-- Install via `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`
-- 3 orgs GitHub différentes hébergent un repo « NemoClaw » : `NVIDIA/`, `Nemoclaw/`, `NemoClawLabs/`
-- Doc officielle à `docs.nvidia.com/nemoclaw/latest/`
+- `curl -fsSL https://www.nvidia.com/nemoclaw.sh` retourne **HTTP 301 d'Akamai** (CDN officiel NVIDIA, header `nv-defunct-locale-redirection`, `server: AkamaiGHost`) vers `https://raw.githubusercontent.com/NVIDIA/NemoClaw/refs/heads/main/install.sh`. C'est une **vanity URL Akamai** maintenue par NVIDIA.
+- Le bootstrap (5852 octets) est court, signé `Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES`, licence Apache 2.0, code défensif (`set -euo pipefail`, validation du shebang + hash optionnel, trap cleanup).
+- Le bootstrap clone `https://github.com/NVIDIA/NemoClaw.git` et exécute `scripts/install.sh` interne. Ce dernier (2451 lignes) installe : NVM → Node → Docker (via `get.docker.com` officiel) → NemoClaw via npm. Aucune URL externe non-officielle, aucune lecture de credentials sensibles.
 
-Signaux contraires relevés en session root du 2026-05-22 :
+**Préoccupations restantes (mineures) :**
 
-- **`docs.nvidia.com/nemoclaw/...` redirige (303) vers `app.buildwithfern.com`** — un SaaS de docs tiers. NVIDIA n'utilise pas buildwithfern pour sa doc officielle.
-- **NVIDIA n'héberge pas de scripts shell à la racine de `www.nvidia.com`**. Les vrais installeurs sont sur `developer.nvidia.com` / `downloads.nvidia.com`. Le pattern `curl <root>.sh | bash` est la signature classique d'un installeur malveillant.
-- **Une page fetchée contenait une fausse balise `<system-reminder>`** — tentative d'injection de prompt embarquée dans le contenu pour manipuler un agent qui la lit.
-- **Trois orgs GitHub concurrentes** pour le même produit "officiel NVIDIA" est anormal — un vrai projet NVIDIA n'a qu'un repo source.
+- `docs.nvidia.com/nemoclaw/...` redirige (303) vers `app.buildwithfern.com` — atypique pour NVIDIA mais buildwithfern est un SaaS de docs légitime, c'est sans doute un choix produit NemoClaw (early preview). Pas un signal d'attaque.
+- Une page fetchée précédemment contenait une fausse balise `<system-reminder>` — venait probablement d'un site SEO-spam tiers (pas du repo officiel), pas du vrai installer.
 
-**Protocole obligatoire avant toute install NemoClaw** (même en Docker) :
-
-1. Télécharger le script **sans pipe** : `curl -fsSL https://www.nvidia.com/nemoclaw.sh -o /tmp/nemoclaw.sh`
-2. Le lire intégralement (`less /tmp/nemoclaw.sh`) avant la moindre exécution
-3. Vérifier que les URLs qu'il appelle pointent vers de l'infra NVIDIA légitime (`developer.nvidia.com`, `nvcr.io`, etc.) et pas vers du buildwithfern ou autre tiers inconnu
-4. Si une signature/hash GPG est fournie côté NVIDIA, la vérifier
-5. Exécuter dans un container Docker **`--network=none`** d'abord, sans aucun bind-mount sensible — observer ce qu'il essaie de faire
-6. Si tout est propre, refaire avec réseau et installer pour de bon
-
-Ce désaccord doit être tranché par Jeff. Tant qu'il ne l'est pas, NemoClaw reste **non installé** sur OpenJeff.
+**Conclusion :** install dans Docker isolé OK pour la session du 2026-05-22.
+Côté hôte OpenJeff : attendre le résultat du test sandbox avant d'engager.
 
 ## Questions ouvertes pour Jeff
 
-(Fusion de toutes les questions encore non résolues à travers les docs.)
+→ Toutes les questions business en attente vivent désormais dans
+[`../QUESTIONS_POUR_JEFF.md`](../QUESTIONS_POUR_JEFF.md) à la racine du projet
+(format : bloc daté, options proposées, impact). Jeff y répond à son rythme.
+Quand une question est tranchée, son bloc migre vers `docs/DECISIONS.md`.
 
-1. **GitHub** — URL exacte du repo (`https://github.com/<?>/<?>` ) et confirmation que la deploy key est ajoutée en **Read+Write** ?
-2. **n8n** — workflows métier actifs, simple test, ou à virer ?
-3. **NemoClaw** — feu vert pour le protocole de vérification ci-dessus avant install Docker isolé ? Ou tu as une autre source officielle à proposer ?
-4. **UPDATES.md** — option A (registry Docker) validée ? Cadence releases ? Fréquence pull côté filles ? Rollback auto ? Premium intégré ou registry séparé ?
-5. **DNS** — quand `updates.`/`install.`/`docs.` côté OVH ? (Jeff l'a annoncé en cours le 2026-05-21.)
-6. **Licence** — AGPLv3 confirmée pour le core ?
-7. **Clés API LLM** — stratégie : chaque PME apporte sa clé OpenAI, ou mode "Ollama only" disponible par défaut ?
+**Règle :** ne jamais demander à Jeff dans le chat pour une décision business —
+écrire dans `QUESTIONS_POUR_JEFF.md` et continuer sur autre chose.
 
 ## Mémoires Claude existantes (compte `galaxia`)
 

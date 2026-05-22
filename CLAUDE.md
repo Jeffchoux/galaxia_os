@@ -125,11 +125,12 @@ cd /opt/n8n && docker-compose ps
 
 ## Pour Claude Code dans ce projet
 
-- **Autonomie totale** demandée par Jeff (cf. `feedback_autonomy` en mémoire) — exécuter sans demander confirmation pour les commandes bash/edit/write usuelles
-- **Jeff est manager non-développeur** — expliquer les décisions techniques en langage métier, présenter des choix avec tradeoffs business
-- En cas de blocage qui nécessite une action que seul Jeff peut faire (compte tiers, DNS, paiement), exposer clairement quoi faire et continuer sur d'autres fronts en attendant
-- Mettre à jour ce fichier quand une convention nouvelle est établie
-- **Mettre à jour `docs/STATUS.md`** quand l'état des services change ou qu'un item est résolu
+- **Autonomie totale** — Jeff a explicitement demandé : aucune confirmation, jamais. Toutes les décisions techniques sont prises seul. Bash, edit, write, install : tu décides et tu fais.
+- **Jamais d'interruption dans le chat pour des questions business.** Si tu butes sur une vraie décision business, tu **écris dans [`QUESTIONS_POUR_JEFF.md`](QUESTIONS_POUR_JEFF.md)** à la racine du projet (format : bloc daté, court, impact, options proposées). Jeff y répond à son rythme. Le chat est pour les updates de progrès et les blocages techniques durs (pas pour demander "tu veux X ou Y ?").
+- **Jeff est manager non-développeur** — expliquer en langage métier. Présenter des choix avec tradeoffs business, pas seulement techniques.
+- **Mettre à jour `docs/STATUS.md`** à chaque changement d'état notable (service qui démarre/casse, item du backlog résolu, nouvelle découverte).
+- Quand une question dans `QUESTIONS_POUR_JEFF.md` reçoit une réponse, déplacer le bloc vers `docs/DECISIONS.md` (créer le fichier si absent) avec date + réponse, pour garder l'historique des choix.
+- Mettre à jour ce fichier quand une convention nouvelle est établie.
 
 ## Garde-fous spécifiques
 
