@@ -1,0 +1,17 @@
+[Unit]
+Description=Galaxia — déclenche le coder daily à 07:00 UTC (30 min après la veille)
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/coder
+
+[Timer]
+# Veille fire à 06:30 UTC + jitter 5 min. On laisse 30 min avant le coder
+# pour être sûr que le rapport de veille soit écrit et que Ollama soit libre.
+OnCalendar=*-*-* 07:00:00
+# Rattraper si la machine était éteinte
+Persistent=true
+# Désynchronise jusqu'à 5 min pour éviter pic exact sur l'API Anthropic
+# si jamais N filles avaient des coders actifs (à terme).
+RandomizedDelaySec=5min
+Unit=galaxia-coder.service
+
+[Install]
+WantedBy=timers.target

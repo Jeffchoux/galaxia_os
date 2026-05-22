@@ -10,6 +10,8 @@ un diff plutôt qu'en éditant `/etc/`.
 |-------------------------------|----------------------------------------------------------------------|
 | `galaxia-veille.service`      | Veille IA quotidienne (HN/GitHub/HF/arXiv → Ollama → markdown)       |
 | `galaxia-veille.timer`        | Déclencheur de la veille (06:30 UTC + rand 5 min) — mère uniquement  |
+| `galaxia-coder.service`       | Coder agent — lit la veille, ouvre 1-3 PRs sur le repo (Claude API)  |
+| `galaxia-coder.timer`         | Déclencheur du coder (07:00 UTC + rand 5 min) — mère uniquement      |
 | `galaxia-update.service`      | Pull + verify + apply d'une mise à jour signée (galaxia-update.sh)   |
 | `galaxia-update.timer`        | Déclencheur d'update (03:30 UTC + rand 15 min) — galaxie fille       |
 

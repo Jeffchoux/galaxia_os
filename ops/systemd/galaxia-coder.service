@@ -1,0 +1,30 @@
+[Unit]
+Description=Galaxia — coder agent (open daily improvement PRs from the veille)
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/coder
+Wants=network-online.target
+After=network-online.target galaxia-veille.service
+
+[Service]
+Type=oneshot
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/agents/coder
+# Le wizard écrit ANTHROPIC_API_KEY ici. Le préfixe `-` rend la source
+# optionnelle : pas d'échec si le fichier n'existe pas encore (l'agent
+# fail-closera proprement avec "ANTHROPIC_API_KEY missing").
+EnvironmentFile=-/opt/galaxia/config/.env
+ExecStart=/usr/bin/node /home/galaxia/galaxia-project/agents/coder/index.mjs
+# Cap à 60 min : un run normal tient en 5–15 min. Au-delà = boucle, on coupe.
+TimeoutStartSec=3600
+StandardOutput=journal
+StandardError=journal
+
+# Garde-fous
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# /home (read/write nécessaire pour npm cache + .ssh + .config/gh) et /tmp
+# (le clone éphémère) restent normaux. /usr, /etc, /boot deviennent read-only
+# via ProtectSystem=strict.

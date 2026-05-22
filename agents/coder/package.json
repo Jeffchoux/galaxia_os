@@ -1,0 +1,20 @@
+{
+  "name": "galaxia-coder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Galaxia daily coder agent — reads the veille and opens improvement PRs",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "dry-run": "GALAXIA_CODER_DRY_RUN=1 node index.mjs",
+    "syntax": "node --check index.mjs && node --check schema.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.6",
+    "zod": "^3.23.8"
+  }
+}
