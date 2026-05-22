@@ -69,3 +69,62 @@ dans `QUESTIONS_POUR_JEFF.md` § Q1bis.
 - À documenter dans `docs/STACK.md` § Accès UI
 
 **Suivi** : Q9 (bug plugin `nemoclaw`) reste ouverte mais non bloquante pour ce choix.
+
+---
+
+## 2026-05-22 — Q6 : stockage des clés API LLM côté PME
+
+**Posée le :** 2026-05-22
+**Tranchée le :** 2026-05-22 (autonomie : Jeff non bloquant, décision réversible)
+
+**Décision** : **Option A** — fichier `.env` chmod 600 dans `/opt/galaxia/config/`, owner `galaxia`, une seule clé par installation (selon le provider choisi au wizard).
+
+**Pourquoi A et pas B (pass/age) ni C (Ollama-only par défaut)** :
+- **Simplicité de debug** : un manager non-tech peut ouvrir le fichier et vérifier sa clé, sans outil supplémentaire à apprendre
+- **Pattern Docker-compose standard** : tous les services Galaxia liront ce `.env` via `env_file:` dans le compose — pas de glue secret-manager à écrire
+- **Sécurité suffisante** : chmod 600 + owner non-root + machine PME mono-utilisateur ≈ même surface qu'un secret manager local. Le vrai risque est `git add .env`, mitigué par `.gitignore` + nommage explicite « secrets locaux » dans le header
+- **C écarté** : forcer Ollama par défaut casse la promesse cloud du briefing, et le wizard doit collecter la clé au moment où le manager est devant son écran (sinon il oubliera)
+
+**Conséquences dans le code** :
+- `scripts/wizard.sh` § 3/4 : collecte la clé, écrit `${CONFIG_DIR}/.env` chmod 600
+- `scripts/install.sh` : appelle le wizard avant `print_summary`
+- `docker-compose.yml` (à venir) : déclarera `env_file: /opt/galaxia/config/.env` pour les services qui consomment des clés
+
+**Suivi** : si une PME demande un secret manager (audit conformité, multi-utilisateurs), on peut basculer vers `age` ou `pass` plus tard sans casser le contrat — le wizard peut produire les deux formats. Pas de travail pré-emptif.
+
+---
+
+## 2026-05-22 — Architecture du wizard CLI manager-friendly
+
+**Tranchée le :** 2026-05-22 (autonomie technique)
+
+**Décision** : wizard FR séparé en `scripts/wizard.sh`, appelé par `install.sh` mais aussi exécutable seul (`sudo bash scripts/wizard.sh`).
+
+**4 questions au manager** :
+1. Mode confidentialité (cloud / hybride / 100% local)
+2. Provider LLM (Claude / GPT / Gemini / Ollama) — filtré à Ollama si mode local
+3. Clé API (skip si Ollama) — saisie masquée
+4. Nom de domaine (optionnel, vide = tunnel Cloudflare auto)
++ bonus : mot-clé d'éveil (défaut « Hey Galaxia »)
+
+**Mode dashboard auto-calculé** d'après le domaine (Q8) :
+- domaine vide → `tunnel` (cloudflared natif NemoClaw)
+- domaine fourni → `caddy` (reverse proxy + HTTPS auto)
+
+**Sortie** :
+- `${CONFIG_DIR}/galaxia.conf` — config publique, chmod 644
+- `${CONFIG_DIR}/.env` — secrets, chmod 600, owner `galaxia`
+
+**Modes** :
+- **Interactif** (défaut) : pose les questions, valide par défaut « entrée »
+- **Non-interactif** (`GALAXIA_NON_INTERACTIVE=1`) : pilote par env vars, fail si une réponse manque
+- **Dry-run** (`GALAXIA_CONFIG_DIR=/tmp/...`) : permet de tester sans root et sans toucher `/opt/galaxia`
+
+**Idempotence** : si `galaxia.conf` existe, affiche la config courante et demande « reconfigurer ? » (défaut non, backup sinon).
+
+**Pourquoi script séparé et pas fonction dans install.sh** :
+- Re-exécutable seul pour reconfigurer après coup (changer de provider LLM, brancher un domaine)
+- Plus facile à tester (4 scénarios validés en non-interactif)
+- Permet à une future UI web Galaxia d'écrire les mêmes fichiers via le même contrat
+
+**Conventions UI tirées du test** : toute UI dans une fonction dont le `$(...)` est capturé doit aller à `>&2`, sinon la valeur retournée contient le banner. Voir `section()` et les `cat >&2 <<EXPLAIN` dans `wizard.sh`.

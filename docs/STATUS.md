@@ -63,11 +63,13 @@ Tout le reste découle de là.
 | ✅  | Décision n8n                                             | Résolu 2026-05-22 (arrêté, volume conservé)                    |
 | ✅  | Installer NemoClaw — d'abord en Docker isolé             | Résolu 2026-05-22 (sandbox `galaxia-main` Ready)               |
 | ✅  | Q8 accès dashboard NemoClaw                              | Résolu 2026-05-22 (A par défaut, B en cible)                   |
-| 1   | Wizard CLI manager-friendly (FR, install PME)           | En cours — implémentation Q8 + UX FR                            |
-| 2   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
-| 3   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
-| 4   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Scaffold posé, à brancher                                       |
-| 5   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (Q3)                                    |
+| ✅  | Wizard CLI manager-friendly (FR, install PME)           | Résolu 2026-05-22 — `scripts/wizard.sh` (4 scénarios testés)    |
+| ✅  | Q6 stockage clés API                                     | Résolu 2026-05-22 (.env chmod 600 par défaut, autonomie)        |
+| 1   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
+| 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
+| 3   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Scaffold posé, à brancher                                       |
+| 4   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (Q3)                                    |
+| 5   | Câbler `docker-compose.yml` services + `env_file: .env`  | Dépend du wizard (fait) — prochaine étape concrète              |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 

@@ -84,19 +84,9 @@ Décision attendue avant le premier push GitHub public.
 
 ---
 
-## 6. Stratégie clés API LLM côté PME
+## 6. ✅ résolue le 2026-05-22 (autonomie) — voir [`docs/DECISIONS.md`](docs/DECISIONS.md)
 
-**Posée le :** 2026-05-22
-**Statut :** ouverte
-
-Le briefing global mentionne 3 modes de confidentialité (cloud anonymisé / hybride / 100% local) et 4 providers possibles (Claude, GPT, Gemini, Ollama). Côté PME, comment on collecte/stocke leurs clés ?
-
-Options :
-- **A.** Wizard d'install demande la clé du provider choisi, stockage dans `/opt/galaxia/config/.env` chmod 600.
-- **B.** Wizard demande, stockage dans un secret manager local (`pass`, `age` chiffré).
-- **C.** Mode 100% Ollama par défaut, configuration des clés cloud uniquement via UI plus tard.
-
-Impact : UX du wizard + sécu locale chez la PME.
+Décision : **Option A** retenue par défaut (`.env` chmod 600 dans `/opt/galaxia/config/`), choix réversible (basculement possible vers `age`/`pass` plus tard sans casser le contrat). Tranchée en autonomie pour ne pas bloquer le wizard ; détails et trade-offs dans `docs/DECISIONS.md`.
 
 ---
 

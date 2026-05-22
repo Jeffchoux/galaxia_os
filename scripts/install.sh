@@ -156,23 +156,53 @@ bootstrap_galaxia_dir() {
 }
 
 configure_domain() {
-	local domain="${GALAXIA_DOMAIN:-}"
-	if [ -z "$domain" ] && [ -t 0 ]; then
-		read -rp "Nom de domaine pour cette galaxie (ENTRÉE pour LAN seulement) : " domain
+	# Source la config produite par le wizard (le wizard a déjà demandé le domaine)
+	local conf="$GALAXIA_DIR/config/galaxia.conf"
+	if [ -f "$conf" ]; then
+		# shellcheck source=/dev/null
+		. "$conf"
 	fi
-	if [ -n "$domain" ]; then
-		log "Configuration Caddy pour $domain..."
-		cat > /etc/caddy/Caddyfile.galaxia <<CADDY
+
+	local domain="${GALAXIA_DOMAIN:-}"
+	if [ -z "$domain" ]; then
+		log "Pas de domaine — accès dashboard via tunnel Cloudflare (cf. wizard)."
+		return
+	fi
+
+	log "Configuration Caddy pour $domain..."
+	cat > /etc/caddy/Caddyfile.galaxia <<CADDY
 $domain {
 	reverse_proxy localhost:3000
 	encode gzip zstd
 }
 CADDY
-		# TODO : merger avec /etc/caddy/Caddyfile existant proprement
-		systemctl reload caddy || true
-	else
-		log "Pas de domaine fourni — galaxie en LAN only (accès http://<ip>:3000)."
+	# TODO : merger avec /etc/caddy/Caddyfile existant proprement
+	systemctl reload caddy || true
+}
+
+run_wizard() {
+	if [ "${GALAXIA_SKIP_WIZARD:-0}" = "1" ]; then
+		warn "Wizard sauté (GALAXIA_SKIP_WIZARD=1). Vous devrez créer $GALAXIA_DIR/config/galaxia.conf à la main."
+		return
 	fi
+
+	# Détection du wizard.sh à côté de install.sh (mode repo).
+	# En mode curl|bash, $BASH_SOURCE est un descripteur (/dev/stdin, /dev/fd/63...) :
+	# pas de sibling possible, on saute proprement.
+	local self_dir wizard_path
+	self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || echo "")"
+	wizard_path="${self_dir}/wizard.sh"
+
+	if [ -z "$self_dir" ] || [ ! -f "$wizard_path" ]; then
+		warn "wizard.sh introuvable à côté de install.sh — config à compléter manuellement après install."
+		warn "Pour relancer : sudo GALAXIA_CONFIG_DIR=$GALAXIA_DIR/config bash <chemin>/wizard.sh"
+		return
+	fi
+
+	log "Lancement du wizard de configuration..."
+	GALAXIA_CONFIG_DIR="$GALAXIA_DIR/config" \
+	GALAXIA_USER="$GALAXIA_USER" \
+		bash "$wizard_path"
 }
 
 install_update_cron() {
@@ -218,6 +248,7 @@ main() {
 	install_ollama
 	install_nemoclaw
 	bootstrap_galaxia_dir
+	run_wizard
 	configure_domain
 	install_update_cron
 	print_summary
