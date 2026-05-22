@@ -1,0 +1,107 @@
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+
+// CPU inference (no GPU on OpenJeff) runs ~2 tok/s for llama3.1:8b, so a TLDR
+// of ~80 tokens takes ~40-60s. Keep timeout generous.
+export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_000, numPredict = 90 } = {}) {
+  const prompt = buildPrompt(item);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(OLLAMA_URL, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        stream: false,
+        options: { temperature: 0.2, num_predict: numPredict },
+      }),
+    });
+    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+    const data = await res.json();
+    return cleanTldr(data.response || '');
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function buildPrompt(item) {
+  return [
+    'Tu es l\'agent de veille IA de Galaxia (écosystème IA souverain pour PME).',
+    'Résume l\'item suivant en UNE phrase française de 25 mots max, factuelle, sans préambule, sans guillemets.',
+    'Souligne ce qui est pertinent pour une PME (souveraineté, on-premise, agents, RAG, sécurité, Ollama).',
+    '',
+    `Titre : ${item.title}`,
+    item.summary ? `Description : ${item.summary}` : '',
+    item.url ? `Lien : ${item.url}` : '',
+    '',
+    'TLDR :',
+  ].filter(Boolean).join('\n');
+}
+
+function cleanTldr(text) {
+  return String(text)
+    .replace(/^\s*tldr\s*:?\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export async function renderReport(groups, { date, fetchImpl = fetch, synth = synthesizeItem, maxPerSource = 8 } = {}) {
+  const lines = [];
+  lines.push(`# Veille Galaxia — ${date}`);
+  lines.push('');
+  lines.push('> Synthèse quotidienne via Ollama local. Mots-clés filtrés pour pertinence PME / IA souveraine.');
+  lines.push('');
+
+  const order = ['hackernews', 'github-trending', 'arxiv-cs.AI', 'arxiv-cs.LG'];
+  const sourceKeys = [...new Set([...order, ...groups.keys()])].filter((k) => groups.has(k));
+
+  for (const key of sourceKeys) {
+    lines.push(`## ${humanSource(key)}`);
+    lines.push('');
+    const items = groups.get(key) ?? [];
+    const errors = items.filter((i) => i.error);
+    const ok = items.filter((i) => !i.error).slice(0, maxPerSource);
+
+    for (const e of errors) {
+      lines.push(`- _Erreur de récupération_ : \`${e.error}\``);
+    }
+    if (ok.length === 0 && errors.length === 0) {
+      lines.push('_Aucun item pertinent aujourd\'hui._');
+      lines.push('');
+      continue;
+    }
+
+    for (const item of ok) {
+      let tldr = item.summary?.slice(0, 200) || '';
+      try {
+        const t = await synth(item, { fetchImpl });
+        if (t) tldr = t;
+      } catch (err) {
+        tldr = `(synth indisponible : ${err.message || err}) ${tldr}`.trim();
+      }
+      lines.push(`- **[${item.title}](${item.url})**`);
+      lines.push(`  ${tldr}`);
+      if (item._matched?.length) {
+        lines.push(`  _matches:_ ${item._matched.join(', ')}`);
+      }
+      lines.push('');
+    }
+  }
+
+  lines.push('---');
+  lines.push(`_Généré automatiquement par \`agents/veille\` le ${date}._`);
+  return lines.join('\n');
+}
+
+function humanSource(key) {
+  const map = {
+    'hackernews': 'HackerNews — front page',
+    'github-trending': 'GitHub Trending — daily',
+    'arxiv-cs.AI': 'arXiv — cs.AI',
+    'arxiv-cs.LG': 'arXiv — cs.LG',
+  };
+  return map[key] || key;
+}

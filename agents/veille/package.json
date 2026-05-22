@@ -1,0 +1,16 @@
+{
+  "name": "@galaxia/veille",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Galaxia daily AI watch — scans HN, GitHub trending, arxiv, synthesizes via local Ollama.",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/"
+  },
+  "license": "Apache-2.0"
+}
