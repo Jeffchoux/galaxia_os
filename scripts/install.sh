@@ -21,6 +21,9 @@ set -euo pipefail
 GALAXIA_DIR="${GALAXIA_DIR:-/opt/galaxia}"
 GALAXIA_USER="${GALAXIA_USER:-galaxia}"
 UPDATES_URL="${UPDATES_URL:-https://updates.galaxia-os.com}"
+# Source de repli quand on est en mode curl|bash : pas de sibling wizard.sh
+# accessible, on le récupère depuis le repo.
+GALAXIA_REPO_RAW="${GALAXIA_REPO_RAW:-https://raw.githubusercontent.com/Jeffchoux/galaxia_os/main}"
 MIN_RAM_MB=4096
 MIN_DISK_GB=20
 
@@ -186,17 +189,28 @@ run_wizard() {
 		return
 	fi
 
-	# Détection du wizard.sh à côté de install.sh (mode repo).
-	# En mode curl|bash, $BASH_SOURCE est un descripteur (/dev/stdin, /dev/fd/63...) :
-	# pas de sibling possible, on saute proprement.
+	# Mode repo : wizard.sh est à côté d'install.sh.
+	# Mode curl|bash : $BASH_SOURCE est un descripteur (/dev/stdin, /dev/fd/63…),
+	# pas de sibling possible — on télécharge depuis le repo public.
 	local self_dir wizard_path
 	self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || echo "")"
 	wizard_path="${self_dir}/wizard.sh"
 
 	if [ -z "$self_dir" ] || [ ! -f "$wizard_path" ]; then
-		warn "wizard.sh introuvable à côté de install.sh — config à compléter manuellement après install."
-		warn "Pour relancer : sudo GALAXIA_CONFIG_DIR=$GALAXIA_DIR/config bash <chemin>/wizard.sh"
-		return
+		wizard_path="$(mktemp -t galaxia-wizard-XXXXXX.sh)"
+		log "Téléchargement du wizard depuis ${GALAXIA_REPO_RAW}/scripts/wizard.sh ..."
+		if ! curl -fsSL "${GALAXIA_REPO_RAW}/scripts/wizard.sh" -o "$wizard_path"; then
+			warn "Téléchargement du wizard échoué — config à compléter manuellement."
+			warn "Pour relancer : sudo GALAXIA_CONFIG_DIR=$GALAXIA_DIR/config bash <(curl -fsSL ${GALAXIA_REPO_RAW}/scripts/wizard.sh)"
+			rm -f "$wizard_path"
+			return
+		fi
+		# Petite vérif de cohérence pour éviter d'exécuter un HTML 404 si le path bouge.
+		if ! head -1 "$wizard_path" | grep -q '^#!.*bash'; then
+			warn "Contenu téléchargé pas reconnu comme un script bash — wizard sauté."
+			rm -f "$wizard_path"
+			return
+		fi
 	fi
 
 	log "Lancement du wizard de configuration..."
@@ -206,6 +220,13 @@ run_wizard() {
 }
 
 install_update_cron() {
+	# On n'écrit le cron QUE si le binaire existe — sinon cron lance un truc
+	# manquant tous les jours et pollue les logs / mailx pendant des semaines.
+	if [ ! -x /usr/local/bin/galaxia-update ]; then
+		warn "Binaire /usr/local/bin/galaxia-update absent → cron de mise à jour pas installé."
+		warn "Sera mis en place automatiquement quand le mécanisme updates sera livré (cf. docs/UPDATES.md)."
+		return
+	fi
 	log "Installation du cron de mise à jour quotidien..."
 	cat > /etc/cron.d/galaxia-update <<CRON
 # Mise à jour quotidienne de la galaxie fille depuis la galaxie mère
@@ -213,8 +234,27 @@ install_update_cron() {
 30 3 * * * $GALAXIA_USER /usr/local/bin/galaxia-update >> $GALAXIA_DIR/logs/update.log 2>&1
 CRON
 	chmod 644 /etc/cron.d/galaxia-update
-	# Le binaire galaxia-update sera déposé par le pull initial.
-	warn "Binaire /usr/local/bin/galaxia-update : TODO (à fournir par le pull initial)"
+}
+
+verify_services() {
+	log "Vérification des services post-install..."
+	local svc rc=0
+	for svc in docker caddy ollama; do
+		if systemctl is-active --quiet "$svc"; then
+			log "  ✓ $svc actif"
+		else
+			warn "  ✗ $svc inactif — vérifier : systemctl status $svc"
+			rc=1
+		fi
+	done
+	# Ollama doit répondre sur 11434 pour que la suite marche
+	if curl -fsS --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+		log "  ✓ Ollama API joignable sur :11434"
+	else
+		warn "  ✗ Ollama API ne répond pas sur :11434 (peut être en cours de chargement)"
+		rc=1
+	fi
+	return $rc
 }
 
 print_summary() {
@@ -251,6 +291,7 @@ main() {
 	run_wizard
 	configure_domain
 	install_update_cron
+	verify_services || warn "Certains services ne tournent pas — installation marquée 'à vérifier'."
 	print_summary
 }
 
