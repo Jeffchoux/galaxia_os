@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { fetchHackerNews } from './sources/hackernews.js';
 import { fetchGithubTrending } from './sources/github-trending.js';
 import { fetchArxiv } from './sources/arxiv.js';
+import { fetchBlogs } from './sources/blogs.js';
 import { filterItems, groupBySource } from './filter.js';
 import { renderReport } from './synthesize.js';
 
@@ -29,6 +30,7 @@ export async function run({ date = today(), outDir = OUT_DIR } = {}) {
     safe('hackernews', () => fetchHackerNews()),
     safe('github-trending', () => fetchGithubTrending()),
     safe('arxiv', () => fetchArxiv()),
+    safe('blogs', () => fetchBlogs()),
   ]);
 
   const allItems = [];

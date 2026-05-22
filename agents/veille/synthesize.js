@@ -75,7 +75,7 @@ export async function renderReport(groups, { date, fetchImpl = fetch, synth = sy
   lines.push('> Synthèse quotidienne via Ollama local. Mots-clés filtrés pour pertinence PME / IA souveraine.');
   lines.push('');
 
-  const order = ['hackernews', 'github-trending', 'arxiv-cs.AI', 'arxiv-cs.LG'];
+  const order = ['hackernews', 'github-trending', 'huggingface-blog', 'arxiv-cs.AI', 'arxiv-cs.LG'];
   const sourceKeys = [...new Set([...order, ...groups.keys()])].filter((k) => groups.has(k));
 
   for (const key of sourceKeys) {
@@ -123,6 +123,7 @@ function humanSource(key) {
   const map = {
     'hackernews': 'HackerNews — front page',
     'github-trending': 'GitHub Trending — daily',
+    'huggingface-blog': 'Hugging Face — blog',
     'arxiv-cs.AI': 'arXiv — cs.AI',
     'arxiv-cs.LG': 'arXiv — cs.LG',
   };
