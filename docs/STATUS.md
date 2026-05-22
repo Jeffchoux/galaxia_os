@@ -66,13 +66,14 @@ Tout le reste découle de là.
 | ✅  | Wizard CLI manager-friendly (FR, install PME)           | Résolu 2026-05-22 — `scripts/wizard.sh` (4 scénarios testés)    |
 | ✅  | Q6 stockage clés API                                     | Résolu 2026-05-22 (.env chmod 600 par défaut, autonomie)        |
 | ✅  | Câbler `docker-compose.yml` services + `env_file: .env`  | Résolu 2026-05-22 (ancre YAML `x-galaxia-env`, `required: false`, smoke-test OK) |
-| ✅  | Module de veille IA quotidien (HN, GitHub, arxiv)        | Résolu 2026-05-22 — systemd timer actif (06:30 UTC) + prompt few-shot |
+| ✅  | Module de veille IA quotidien (HN, GitHub, arxiv, HF)    | Résolu 2026-05-22 — systemd timer actif (06:30 UTC) + 4 sources |
+| ✅  | CI GitHub Actions (shellcheck + tests + compose + wizard) | Résolu 2026-05-22 — 4 jobs verts                                |
+| ✅  | `scripts/install.sh` durci pour `curl \| bash` public      | Résolu 2026-05-22 — wizard download fallback, healthcheck, cron sécurisé |
+| ✅  | `scripts/health.sh` — bilan santé une page (console/quiet/json) | Résolu 2026-05-22                                         |
 | 1   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
 | 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
-| 3   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (Q3)                                    |
-| 4   | CI GitHub Actions (lint bash, tests veille, dry-run wizard) | Pas de dépendance — à faire dès que possible                |
-| 5   | Préparer `scripts/install.sh` v2 pour `curl \| bash` public | Wizard livré, install.sh à durcir (rerun safe, multi-distro)  |
-| 6   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
+| 3   | POC `bootstrap_galaxia_dir` (pull manifest + verify)     | En cours — POC indépendant du choix A/B/C (signature cosign)    |
+| 4   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 

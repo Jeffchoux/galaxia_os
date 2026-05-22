@@ -26,6 +26,8 @@ jobs:
             --exclude=SC1091,SC2155 \
             scripts/install.sh \
             scripts/wizard.sh \
+            scripts/galaxia-update.sh \
+            scripts/health.sh \
             ops/sandbox/nemoclaw/run.sh
 
   veille-tests:
@@ -64,6 +66,68 @@ jobs:
           sudo chown -R "$USER:$USER" /opt/galaxia/config
           sudo chmod 600 /opt/galaxia/config/.env
           docker compose --profile never config
+
+  update-poc:
+    name: galaxia-update.sh signed fixture round-trip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cosign v2 (air-gapped friendly flow)
+        run: |
+          curl -sL https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64 \
+            -o /tmp/cosign
+          sudo install -m 0755 /tmp/cosign /usr/local/bin/cosign
+          cosign version
+      - name: Build signed fixture, run update script, assert VERSION
+        env:
+          COSIGN_PASSWORD: ''
+        run: |
+          set -euo pipefail
+          fixture=$RUNNER_TEMP/fixture
+          keys=$RUNNER_TEMP/keys
+          install_dir=$RUNNER_TEMP/galaxia-install
+          mkdir -p "$fixture" "$keys"
+          cd "$keys" && cosign generate-key-pair >/dev/null && cd -
+
+          cat > "$fixture/stable.json" <<'EOF'
+          {"schema":1,"version":"v0.0.0-ci","released_at":"2026-01-01T00:00:00Z","channel":"stable","images":{},"notes":"CI fixture"}
+          EOF
+
+          cosign sign-blob --yes --tlog-upload=false \
+            --key "$keys/cosign.key" \
+            --output-signature "$fixture/stable.json.sig" \
+            "$fixture/stable.json"
+
+          # Happy path
+          GALAXIA_DIR="$install_dir" \
+          GALAXIA_UPDATE_FIXTURE="$fixture" \
+          COSIGN_PUBKEY="$keys/cosign.pub" \
+          LOG_FILE="$install_dir/update.log" \
+          VERSION_FILE="$install_dir/VERSION" \
+            bash scripts/galaxia-update.sh
+          test "$(cat "$install_dir/VERSION")" = "v0.0.0-ci"
+
+          # Idempotence (same version → exit 0, no-op)
+          GALAXIA_DIR="$install_dir" \
+          GALAXIA_UPDATE_FIXTURE="$fixture" \
+          COSIGN_PUBKEY="$keys/cosign.pub" \
+          LOG_FILE="$install_dir/update.log" \
+          VERSION_FILE="$install_dir/VERSION" \
+            bash scripts/galaxia-update.sh
+
+          # Bad signature must reject
+          echo 'CORRUPTED' > "$fixture/stable.json.sig"
+          rm -rf "$install_dir/VERSION"
+          if GALAXIA_DIR="$install_dir" \
+             GALAXIA_UPDATE_FIXTURE="$fixture" \
+             COSIGN_PUBKEY="$keys/cosign.pub" \
+             LOG_FILE="$install_dir/update.log" \
+             VERSION_FILE="$install_dir/VERSION" \
+               bash scripts/galaxia-update.sh; then
+            echo "FAIL: expected non-zero exit on corrupted signature" >&2
+            exit 1
+          fi
+          test ! -f "$install_dir/VERSION"
 
   wizard-dryrun:
     name: scripts/wizard.sh non-interactive (ollama path)

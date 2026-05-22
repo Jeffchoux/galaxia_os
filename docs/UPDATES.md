@@ -1,6 +1,9 @@
 # Mécanisme de mise à jour Hub & Spoke
 
-> Statut : **design proposé**, à valider avec Jeff avant implémentation.
+> Statut : **design proposé + POC client livré**, à valider avec Jeff.
+> Le client (`scripts/galaxia-update.sh`) marche end-to-end avec signature
+> cosign vérifiée — voir § POC ci-dessous. Le serveur (registry ou static
+> manifests) reste à choisir parmi A/B/C.
 
 ## Contraintes
 
@@ -89,6 +92,59 @@ notes_url: https://docs.galaxia-os.com/releases/v1.2.3
 
 SemVer strict : `MAJOR.MINOR.PATCH` (+ `-rc.N` pour les pre-release).
 Canaux : `stable` (default), `beta`, `edge`.
+
+## POC client (`scripts/galaxia-update.sh`) — livré 2026-05-22
+
+Le client galaxie fille est implémenté et testé end-to-end. Il est volontairement
+indépendant du choix A/B/C : il fetch un manifeste JSON + sa signature détachée,
+vérifie avec cosign (clé publique embarquée), compare la version, et déclenche
+le `docker compose pull && up -d` si différence.
+
+**Pourquoi JSON et pas YAML** : parsable en bash via `python3 -c` (stdlib),
+pas de dépendance `yq` à installer côté PME. Le contenu reste le même.
+
+**Pourquoi cosign v2** : v2 a un flow air-gapped trivial (`--tlog-upload=false`
++ `--insecure-ignore-tlog`). v3 force `signing-config` — adresseable mais
+plus de friction. Côté Galaxia on est en modèle « clé publique de confiance
+embarquée dans l'installeur », pas en modèle Rekor transparency log. La clé
+publique = la racine de confiance.
+
+**Validé en CI** :
+- Happy path : manifeste signé valide → VERSION écrit
+- Idempotence : second run, même version → no-op exit 0
+- Signature corrompue → refuse, VERSION non écrit, exit 1
+
+**Reste à câbler après la décision Q3** :
+- L'URL `updates.galaxia-os.com` (DNS + serveur)
+- La génération initiale du keypair côté mère (`/opt/galaxia/keys/galaxia-os.{key,pub}`)
+- La distribution de la clé publique aux galaxies filles (probablement dans
+  l'image de l'installeur, signée par sa propre chaîne TLS au moment du
+  `curl install.galaxia-os.com`)
+- Le mécanisme de rotation de clé (rare mais à prévoir)
+
+**Test local rapide :**
+
+```bash
+# Générer un keypair de test
+mkdir -p /tmp/galaxia-poc-keys && cd /tmp/galaxia-poc-keys
+COSIGN_PASSWORD='' cosign generate-key-pair
+
+# Préparer un manifeste signé
+mkdir -p /tmp/galaxia-fixture
+cat > /tmp/galaxia-fixture/stable.json <<'EOF'
+{"schema":1,"version":"v0.1.0-test","channel":"stable","images":{},"notes":"test"}
+EOF
+COSIGN_PASSWORD='' cosign sign-blob --yes --tlog-upload=false \
+  --key /tmp/galaxia-poc-keys/cosign.key \
+  --output-signature /tmp/galaxia-fixture/stable.json.sig \
+  /tmp/galaxia-fixture/stable.json
+
+# Lancer l'update
+GALAXIA_DIR=/tmp/galaxia-poc-install \
+GALAXIA_UPDATE_FIXTURE=/tmp/galaxia-fixture \
+COSIGN_PUBKEY=/tmp/galaxia-poc-keys/cosign.pub \
+bash scripts/galaxia-update.sh
+```
 
 ## Questions ouvertes (pour Jeff)
 
