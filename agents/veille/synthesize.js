@@ -21,8 +21,9 @@ export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_
           num_predict: numPredict,
           // \n\n catches the moment the model starts a new paragraph (bullet
           // list, second sentence). A bare \n stops too early when the model
-          // emits a leading newline.
-          stop: ['\n\n', '\n* ', '\n- ', '\n**', 'Titre :', 'Description :', 'Lien :', 'Exemple'],
+          // emits a leading newline. Avoid stops that can legitimately appear
+          // in a French sentence ("Exemple", etc.).
+          stop: ['\n\n', '\n* ', '\n- ', '\n**', '\nTitre :', '\nDescription :', '\nLien :'],
         },
       }),
     });
@@ -94,12 +95,15 @@ export async function renderReport(groups, { date, fetchImpl = fetch, synth = sy
     }
 
     for (const item of ok) {
-      let tldr = item.summary?.slice(0, 200) || '';
+      // Fallback en cascade : synth Ollama → summary tronqué → titre seul.
+      // Évite les lignes vides quand l'item n'a ni summary ni LLM disponible.
+      const summaryFallback = item.summary?.slice(0, 200) || '';
+      let tldr = summaryFallback || item.title;
       try {
         const t = await synth(item, { fetchImpl });
-        if (t) tldr = t;
+        if (t && t.length > 5) tldr = t;
       } catch (err) {
-        tldr = `(synth indisponible : ${err.message || err}) ${tldr}`.trim();
+        tldr = `(synth indisponible : ${err.message || err}) ${summaryFallback || item.title}`.trim();
       }
       lines.push(`- **[${item.title}](${item.url})**`);
       lines.push(`  ${tldr}`);

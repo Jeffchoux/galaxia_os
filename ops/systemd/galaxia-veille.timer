@@ -1,0 +1,15 @@
+[Unit]
+Description=Galaxia — déclenche la veille IA tous les jours à 06:30
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/veille
+
+[Timer]
+# Tous les jours à 06h30 heure du serveur (UTC sur OpenJeff)
+OnCalendar=*-*-* 06:30:00
+# Si la machine était éteinte au moment du déclenchement, rattraper au boot
+Persistent=true
+# Désynchroniser légèrement (max 5 min) pour ne pas marteler les sources
+RandomizedDelaySec=5min
+Unit=galaxia-veille.service
+
+[Install]
+WantedBy=timers.target

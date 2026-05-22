@@ -1,0 +1,26 @@
+[Unit]
+Description=Galaxia — agent de veille IA quotidien
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/veille
+Wants=ollama.service
+After=ollama.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/agents/veille
+ExecStart=/usr/bin/node index.js
+# Veille dure ~5-10 min côté CPU. Cap à 30 min pour éviter les boucles infinies.
+TimeoutStartSec=1800
+# Log dans journalctl (filtrer : journalctl -u galaxia-veille.service)
+StandardOutput=journal
+StandardError=journal
+
+# Garde-fous
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/galaxia/galaxia-project/docs/veille
+ProtectHome=read-only
+# Ollama est sur localhost donc pas besoin d'isolation réseau particulière

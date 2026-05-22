@@ -28,5 +28,15 @@ function normalize(hit) {
 }
 
 function stripHtml(s) {
-  return String(s).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+// Algolia returns HN comments with numeric entities (`&#x27;`, `&amp;`…).
+// Decode the common subset; the LLM trips on them otherwise.
+function decodeEntities(s) {
+  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ' };
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&([a-zA-Z]+);/g, (m, n) => named[n] ?? m);
 }

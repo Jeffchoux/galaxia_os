@@ -107,6 +107,26 @@ Décision : **A par défaut** (tunnel natif NemoClaw), **B en cible** (Caddy + p
 
 ---
 
+## 10. Frontière OSS gratuit / modules premium payants
+
+**Posée le :** 2026-05-22
+**Statut :** ouverte (pas bloquante court terme, structurante moyen terme)
+
+Le brief dit : « open source gratuit à la base, freemium avec modules premium payants ». Trois sous-décisions liées qui doivent être prises avant qu'on accepte une contribution externe ou qu'on publie le premier module premium :
+
+1. **Repos** : tout dans `galaxia_os` (un seul repo public, modules premium en sous-dossier sous licence commerciale) ou repo séparé `galaxia-premium` (privé) que la galaxie mère packagera pour les clients payants ?
+2. **CLA** : exiger un Contributor License Agreement (relicensable) pour pouvoir intégrer du code de contributeurs dans la base premium future ? Sans ça, on se ferme la porte à utiliser une contribution OSS dans un module payant.
+3. **Frontière fonctionnelle** : qu'est-ce qui est gratuit (core agent, wake word, wizard, intégrations Claude/GPT/Gemini/Ollama, dashboard de base) vs payant (multi-utilisateur SSO ? Audit log conforme RGPD ? Modules métier sectoriels — RH, comptabilité, juridique ? Support prioritaire ?) ?
+
+**Ma reco par défaut (à valider) :**
+- Repo unique `galaxia_os` AGPLv3 pour le core, dossier `premium/` avec sa propre licence commerciale (BSL ou similar) — un seul `git clone` côté PME, le wizard active/désactive les modules premium selon une licence-key.
+- CLA léger type « tu donnes le droit à Galaxia de relicensier sous toute licence » (modèle Plausible / Sentry).
+- Premium = audit RGPD + modules métier ; tout le reste reste libre.
+
+Décision peut attendre jusqu'au premier module premium concret. Le notant ici pour qu'on n'oublie pas.
+
+---
+
 ## 9. Plugin `nemoclaw` du gateway — bug JSON
 
 **Posée le :** 2026-05-22
