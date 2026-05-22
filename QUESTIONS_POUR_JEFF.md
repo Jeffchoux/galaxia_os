@@ -10,40 +10,30 @@
 
 ---
 
-## 1. GitHub — confirmation URL + deploy key
+## 1bis. GitHub — ajouter la deploy key au bon repo
 
-**Posée le :** 2026-05-21
-**Statut :** ouverte
+**Posée le :** 2026-05-22
+**Statut :** ouverte (Q1 partiellement résolue, voir [`docs/DECISIONS.md`](docs/DECISIONS.md))
 
-Push bloqué : `git@github.com:galaxia-os/galaxia.git` retourne `Permission denied (publickey)`.
+URL repo confirmée : `https://github.com/Jeffchoux/galaxia_os`. J'ai mis à jour
+le remote local en conséquence (`git@github.com:Jeffchoux/galaxia_os.git`).
 
-Trois causes possibles :
-- L'org/repo n'existe pas exactement à `galaxia-os/galaxia` (autre nom ?)
-- La deploy key SSH n'a pas été ajoutée
-- Elle a été ajoutée en read-only (besoin de Read+Write pour pousser)
+**Push toujours bloqué** : la deploy key SSH n'est pas connue de ce repo.
+Test SSH retourne `Permission denied (publickey)`.
 
-**Ce que j'ai besoin de toi :** URL exacte du repo dans le navigateur, et confirmation que sur `<URL>/settings/keys` la clé est en **Read+Write**.
+**Action côté Jeff (2 min)** :
 
-Clé publique à coller si pas déjà fait :
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK galaxia-vps-openjeff
-```
+1. Aller sur https://github.com/Jeffchoux/galaxia_os/settings/keys
+2. Cliquer **« Add deploy key »**
+3. **Title** : `OpenJeff VPS`
+4. **Cocher « Allow write access »** (sans ça, push impossible)
+5. Coller cette clé publique :
+   ```
+   ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK galaxia-vps-openjeff
+   ```
+6. Valider, puis dire « go » dans le chat — je pousse immédiatement les 11 commits prêts.
 
----
-
-## 2. n8n hérité — rôle et avenir
-
-**Posée le :** 2026-05-21
-**Statut :** ouverte
-
-Un container `n8n_n8n_1` (n8nio/n8n v2.21.7) tournait déjà sur OpenJeff à mon arrivée, déployé via `/opt/n8n/docker-compose.yml`, exposé en clair sur `:5678` (pas de TLS, pas d'auth visible).
-
-Trois options à trancher :
-- **A.** Tu l'utilises pour des workflows actifs → je le mets derrière Caddy (`n8n.galaxia-os.com` ?) avec TLS + auth basique, je ferme le 5678 dans UFW.
-- **B.** Tu l'avais installé pour tester, plus utilisé → je l'arrête, je supprime le volume, je ferme le 5678.
-- **C.** Tu veux le garder en l'état → je n'y touche pas mais c'est un risque sécu actuel (UI exposée publiquement sans auth).
-
-Impact : sécu publique du VPS + 200 Mo de RAM + clarté de l'architecture Galaxia (n8n n'est pas dans la stack documentée).
+**Alternative** si tu préfères : créer un Personal Access Token GitHub fine-grained avec scope `Contents: write` sur ce repo, et me le donner en variable d'env — je passe en HTTPS push. Moins propre (token plus puissant qu'une deploy key scoped au repo), mais plus rapide si la deploy key te bloque.
 
 ---
 

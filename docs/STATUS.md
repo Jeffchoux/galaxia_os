@@ -29,7 +29,7 @@ Tout le reste découle de là.
 | OpenShell v0.0.39       | running     | Gateway sur `127.0.0.1:8080` et `172.19.0.1:8080`, sandbox `galaxia-main` Ready    |
 | Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
 | fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
-| n8n (legacy)            | running     | `/opt/n8n/docker-compose.yml`, exposé en clair :5678 (PAS de TLS)                  |
+| n8n (legacy)            | stopped     | Arrêté le 2026-05-22 (Jeff ne se souvenait pas de l'usage), volume `n8n_n8n_data` conservé |
 
 ## Endpoints publics actifs
 
