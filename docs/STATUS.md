@@ -50,34 +50,24 @@ Tout le reste découle de là.
 
 ## Repo Git
 
-- 4 commits sur `main`, working tree clean
-- Remote : `git@github.com:galaxia-os/galaxia.git`
-- **Push bloqué** au 2026-05-21 : `Permission denied (publickey)` — la deploy key SSH n'est pas encore en write sur le repo GitHub
-
-```
-ddde365 docs: technical breakdown of the OpenClaw/NemoClaw/Galaxia stack
-a2773e5 scaffold: install script, updates design doc, project CLAUDE.md
-44a97e1 caddy: enable app.galaxia-os.com vhost (TLS auto verified)
-d300e23 Initial scaffold for Galaxia mother galaxy
-```
-
-Clé publique à coller dans `https://github.com/<org>/<repo>/settings/keys` (Read/Write) :
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK galaxia-vps-openjeff
-```
+- 12 commits sur `main`, working tree clean
+- Remote : `git@github.com:Jeffchoux/galaxia_os.git`
+- **Push OK** au 2026-05-22 (deploy key `galaxia-vps-openjeff` ajoutée par Jeff sur le repo, Read/Write)
+- Voir l'historique via `git log --oneline` (12 commits depuis le scaffold initial)
 
 ## Travail à faire (priorisé)
 
 | Pri | Item                                                    | Bloqué sur                                                    |
 |-----|---------------------------------------------------------|---------------------------------------------------------------|
-| 1   | Push GitHub des 4 commits                                | Jeff : confirmer URL exacte du repo + deploy key en Read+Write |
-| 2   | Décision sur n8n : sécuriser derrière Caddy ou virer ?  | Jeff : rôle du container                                       |
-| 3   | Installer NemoClaw — d'abord en Docker isolé             | Vérification de la source (voir ⚠️ ci-dessous)                  |
-| 4   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff)                                                 |
-| 5   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans `UPDATES.md`                  |
-| 6   | Wizard CLI manager-friendly (FR, choix LLM/wake word)   | Pas commencé                                                   |
-| 7   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Pas commencé                                                   |
-| 8   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (A/B/C)                                |
+| ✅  | Push GitHub                                              | Résolu 2026-05-22 (deploy key OK)                              |
+| ✅  | Décision n8n                                             | Résolu 2026-05-22 (arrêté, volume conservé)                    |
+| ✅  | Installer NemoClaw — d'abord en Docker isolé             | Résolu 2026-05-22 (sandbox `galaxia-main` Ready)               |
+| ✅  | Q8 accès dashboard NemoClaw                              | Résolu 2026-05-22 (A par défaut, B en cible)                   |
+| 1   | Wizard CLI manager-friendly (FR, install PME)           | En cours — implémentation Q8 + UX FR                            |
+| 2   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
+| 3   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
+| 4   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Scaffold posé, à brancher                                       |
+| 5   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (Q3)                                    |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 
@@ -97,12 +87,10 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK
 
 2. **Plugin `nemoclaw` échoue à se charger dans le gateway** : `SyntaxError: Unexpected end of JSON input` sur `/sandbox/.openclaw/extensions/nemoclaw/dist/index.js`. Les 4 autres plugins fonctionnent. Bug à reporter upstream ou à investiguer.
 
-3. **Dashboard non exposé à l'hôte par design.** L'accès passe par :
-   - `nemoclaw tunnel start` (cloudflared tunnel — pattern NemoClaw natif)
-   - OU port-forward via `docker exec` / openshell port-forward
-   - OU configuration Caddy pour proxy via openshell gateway
-
-   **Implication pour Galaxia** : le briefing prévoyait `app.galaxia-os.com` comme UI principale. Soit on intègre cloudflared, soit on configure un reverse proxy Caddy qui pointe vers le sandbox interne via openshell. Question pour Jeff dans `QUESTIONS_POUR_JEFF.md`.
+3. **Dashboard non exposé à l'hôte par design.** Décision Q8 (2026-05-22) :
+   - **Défaut wizard** : `nemoclaw tunnel start` (pattern natif NemoClaw) → URL `<sub>.trycloudflare.com` accessible en zéro config DNS
+   - **Cible une fois domaine PME branché** : openshell port-forward + Caddy reverse proxy sur `<domaine-pme>` → souverain
+   - Détail dans [`DECISIONS.md`](DECISIONS.md) § Q8
 
 ### UFW rules ajoutées (à reproduire côté galaxies filles)
 

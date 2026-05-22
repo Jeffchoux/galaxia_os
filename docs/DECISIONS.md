@@ -41,3 +41,31 @@ dans `QUESTIONS_POUR_JEFF.md` § Q1bis.
 - Volume Docker `n8n_n8n_data` préservé (~20 Mo, négligeable)
 
 **Suivi** : si rien n'est réactivé d'ici fin juin 2026, supprimer définitivement (`docker-compose down -v && rm -rf /opt/n8n`).
+
+---
+
+## 2026-05-22 — Q8 : accès au dashboard NemoClaw
+
+**Posée le :** 2026-05-22
+**Tranchée le :** 2026-05-22
+**Réponse de Jeff** : « tu décides je ne comprends rien »
+
+**Décision** : **Option A par défaut** dans le wizard (`nemoclaw tunnel`, pattern natif), avec **migration prévue vers Option B** (Caddy + port-forward) quand la PME branche son propre domaine. Pas d'Option C (SSH tunnel) — trop technique pour le public manager non-dev.
+
+**Pourquoi A par défaut** :
+- Le wizard doit marcher en zéro config DNS — un manager non-tech ne sait pas configurer un enregistrement A
+- `nemoclaw tunnel start` est le pattern natif NemoClaw → pas de glue code à maintenir
+- Marche derrière NAT, firewall PME, ADSL résidentiel
+- Souveraineté seulement entamée sur **l'accès UI** ; données, inférence et clés API restent locales (cf. modes confidentialité du briefing)
+
+**Pourquoi B en cible** :
+- Une fois la PME a un domaine + DNS, la dépendance Cloudflare disparaît
+- Aligné avec le reste de la stack (Caddy déjà choisi pour `app.galaxia-os.com`)
+- Le wizard détectera la présence d'un domaine et proposera la bascule
+
+**Conséquences dans le code** :
+- `scripts/install.sh` : ajouter étape « accès dashboard » avec choix A/B selon présence domaine
+- Wizard interactif (FR) : par défaut A si pas de domaine, B si domaine fourni
+- À documenter dans `docs/STACK.md` § Accès UI
+
+**Suivi** : Q9 (bug plugin `nemoclaw`) reste ouverte mais non bloquante pour ce choix.

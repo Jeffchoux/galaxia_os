@@ -111,24 +111,9 @@ Décision : install via Docker isolé d'abord (script téléchargé sans pipe, l
 
 ---
 
-## 8. Accès au dashboard NemoClaw — pattern UI pour Galaxia
+## 8. ✅ résolue le 2026-05-22 — voir [`docs/DECISIONS.md`](docs/DECISIONS.md)
 
-**Posée le :** 2026-05-22
-**Statut :** ouverte (impact UX bloquant pour `app.galaxia-os.com`)
-
-NemoClaw n'expose **PAS** son dashboard (port 18789) sur l'hôte par design — c'est dans le sub-namespace réseau du sandbox OpenShell pour des raisons de sécurité (Landlock + isolation). Or le briefing prévoyait `app.galaxia-os.com` comme UI principale de la Galaxia mère, et chaque PME aura besoin de la même chose en local.
-
-Trois options à trancher :
-
-- **A. Cloudflared tunnel (pattern natif NemoClaw)** — `nemoclaw tunnel start` lance un tunnel Cloudflare qui expose le dashboard sur `<sub>.trycloudflare.com` (ou un domaine custom Cloudflare). Marche partout (PME derrière NAT inclus), gratuit pour usage perso, mais dépend d'un service tiers (rompt légèrement la promesse "souverain").
-
-- **B. Reverse proxy Caddy → openshell port-forward** — utiliser `openshell port-forward galaxia-main 18789:18789` (à confirmer si la syntaxe existe) pour exposer le dashboard à l'hôte, puis Caddy `app.galaxia-os.com → 127.0.0.1:18789`. Souverain (rien ne sort), mais nécessite que la PME ait un domaine public + DNS, et donc un setup plus poussé que l'idéal "manager non-tech".
-
-- **C. SSH tunnel local depuis le poste du manager** — pas d'exposition publique, le manager se connecte via `ssh -L 18789:127.0.0.1:18789 galaxia@<ip>` depuis son laptop, et accède via `http://localhost:18789`. Souverain et simple, mais demande un client SSH côté manager (Windows tricky sans gros guide).
-
-**Ma reco :** B + un fallback A pour les PME sans DNS public. Le briefing dit "manager non-tech doit pouvoir installer seul" → A serait plus simple à démarrer, B est la finalité une fois le domaine en place.
-
-Impact : c'est le mode d'accès principal au produit. Tranche en premier sur cette question, le reste de l'UI Galaxia (branding, wizard CLI) découle de là.
+Décision : **A par défaut** (tunnel natif NemoClaw), **B en cible** (Caddy + port-forward) une fois domaine PME branché. Pas de C (SSH tunnel).
 
 ---
 
