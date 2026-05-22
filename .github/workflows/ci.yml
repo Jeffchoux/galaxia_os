@@ -46,12 +46,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate without wizard-produced files
+        env:
+          COMPOSE_PROJECT_NAME: galaxia-ci
         run: |
           # Should succeed even though /opt/galaxia/config/.env doesn't exist
-          # thanks to required: false on the env_file entries.
+          # thanks to required: false on the env_file entries. We force
+          # COMPOSE_PROJECT_NAME because the runner's checkout dir name
+          # (galaxia_os) differs from the local dir (galaxia-project).
           docker compose --profile never config > /tmp/compose-rendered.yml
-          grep -q 'name: galaxia-project' /tmp/compose-rendered.yml
-          grep -q 'noop' /tmp/compose-rendered.yml
+          grep -q '^services:' /tmp/compose-rendered.yml
+          grep -q '  noop:' /tmp/compose-rendered.yml
       - name: Validate with wizard-produced files present
         run: |
           sudo mkdir -p /opt/galaxia/config
