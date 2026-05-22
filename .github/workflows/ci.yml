@@ -26,7 +26,9 @@ jobs:
             --exclude=SC1091,SC2155 \
             scripts/install.sh \
             scripts/wizard.sh \
+            scripts/galaxia \
             scripts/galaxia-update.sh \
+            scripts/galaxia-publish.sh \
             scripts/health.sh \
             ops/sandbox/nemoclaw/run.sh
 
@@ -128,6 +130,38 @@ jobs:
             exit 1
           fi
           test ! -f "$install_dir/VERSION"
+
+  cli-smoke:
+    name: scripts/galaxia CLI help + version + unknown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: galaxia help must list the documented subcommands
+        run: |
+          out=$(bash scripts/galaxia help)
+          # Help should mention every documented subcommand
+          echo "$out" | grep -q 'galaxia status'
+          echo "$out" | grep -q 'galaxia version'
+          echo "$out" | grep -q 'galaxia update'
+          echo "$out" | grep -q 'galaxia config'
+          echo "$out" | grep -q 'galaxia logs'
+          echo "$out" | grep -q 'galaxia veille'
+      - name: galaxia version (no VERSION file)
+        run: |
+          out=$(GALAXIA_DIR=/tmp/no-such-dir bash scripts/galaxia version)
+          echo "$out" | grep -q 'version inconnue'
+      - name: galaxia version (with VERSION file)
+        run: |
+          mkdir -p /tmp/galaxia-cli-test
+          echo 'v9.9.9-ci' > /tmp/galaxia-cli-test/VERSION
+          out=$(GALAXIA_DIR=/tmp/galaxia-cli-test bash scripts/galaxia version)
+          test "$out" = "v9.9.9-ci"
+      - name: galaxia <unknown> must exit non-zero with a hint
+        run: |
+          if bash scripts/galaxia nope >/dev/null 2>&1; then
+            echo "FAIL: expected non-zero exit" >&2
+            exit 1
+          fi
 
   wizard-dryrun:
     name: scripts/wizard.sh non-interactive (ollama path)

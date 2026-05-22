@@ -1,0 +1,17 @@
+# Logrotate config Galaxia — à symlinker dans /etc/logrotate.d/galaxia.
+# Une PME qui laisse tourner Galaxia 6 mois sans réfléchir ne doit pas
+# voir son disque se remplir à cause des logs d'update ou de veille.
+
+/opt/galaxia/logs/*.log {
+    weekly
+    rotate 8
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 galaxia galaxia
+    su galaxia galaxia
+}
+
+# Le journal Caddy (galaxia mère) est géré nativement par journald, pas
+# besoin d'entrée ici. Idem pour systemctl-* (galaxia-veille / galaxia-update).
