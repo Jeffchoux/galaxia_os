@@ -181,6 +181,34 @@ bootstrap_galaxia_dir() {
 	install_update_runtime
 }
 
+install_cli() {
+	# CLI manager-friendly /usr/local/bin/galaxia — wrappe wizard, health,
+	# update, journalctl derrière des commandes courtes.
+	local self_dir cli_src
+	self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || echo "")"
+	cli_src="${self_dir}/galaxia"
+
+	if [ -z "$self_dir" ] || [ ! -f "$cli_src" ]; then
+		cli_src="$(mktemp -t galaxia-cli-XXXXXX)"
+		log "Téléchargement du CLI galaxia depuis le repo..."
+		curl -fsSL "${GALAXIA_REPO_RAW}/scripts/galaxia" -o "$cli_src" \
+			|| { warn "Téléchargement CLI échoué — installation incomplète mais non bloquante."; return; }
+		head -1 "$cli_src" | grep -q '^#!.*bash' \
+			|| { warn "CLI téléchargé non reconnu — saut."; rm -f "$cli_src"; return; }
+	fi
+	# Helpers utilisés par le CLI : health.sh + wizard.sh — déposés en
+	# /usr/local/share/galaxia/ pour rester accessibles même hors checkout.
+	mkdir -p /usr/local/share/galaxia
+	install -m 0755 "$cli_src" /usr/local/bin/galaxia
+	if [ -f "${self_dir}/health.sh" ]; then
+		install -m 0755 "${self_dir}/health.sh" /usr/local/share/galaxia/health.sh
+	fi
+	if [ -f "${self_dir}/wizard.sh" ]; then
+		install -m 0755 "${self_dir}/wizard.sh" /usr/local/share/galaxia/wizard.sh
+	fi
+	log "CLI installé : /usr/local/bin/galaxia (galaxia help)"
+}
+
 install_update_runtime() {
 	# Pose galaxia-update.sh comme binaire système et active le timer
 	# systemd quotidien. Le script peut tourner sans manifeste en place
@@ -344,6 +372,7 @@ main() {
 	install_cosign
 	install_nemoclaw
 	bootstrap_galaxia_dir
+	install_cli
 	run_wizard
 	configure_domain
 	verify_services || warn "Certains services ne tournent pas — installation marquée 'à vérifier'."
