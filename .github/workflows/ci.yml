@@ -163,6 +163,16 @@ jobs:
             exit 1
           fi
 
+  install-e2e:
+    name: install.sh E2E in fresh Ubuntu container (test mode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build E2E image
+        run: docker build -f ops/e2e/Dockerfile -t galaxia-e2e:ci .
+      - name: Run E2E test
+        run: docker run --rm galaxia-e2e:ci
+
   wizard-dryrun:
     name: scripts/wizard.sh non-interactive (ollama path)
     runs-on: ubuntu-latest

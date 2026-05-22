@@ -88,6 +88,8 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | 1   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
 | 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
 | 3   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
+| ✅  | E2E install.sh dans container Ubuntu fresh              | Résolu 2026-05-22 — `ops/e2e/Dockerfile` + `run-test.sh`, 22/22 assertions, job CI `install-e2e` |
+| 5   | Quand 1er module appelant Claude API arrive : skill `/claude-api` | Pas de code Anthropic SDK dans le repo au 2026-05-22 — rappel pour quand un module premium ou un agent PME consommera Claude (prompt caching obligatoire dès le J1) |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 

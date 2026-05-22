@@ -55,9 +55,16 @@ check_resources() {
 }
 
 ensure_user() {
-	if ! id "$GALAXIA_USER" >/dev/null 2>&1; then
-		log "Création de l'utilisateur $GALAXIA_USER..."
+	if id "$GALAXIA_USER" >/dev/null 2>&1; then
+		return
+	fi
+	log "Création de l'utilisateur $GALAXIA_USER..."
+	# adduser (Debian-friendly) absent dans certaines images minimales —
+	# fallback sur useradd qui fait partie de shadow-utils (toujours présent).
+	if command -v adduser >/dev/null 2>&1; then
 		adduser --system --group --home "$GALAXIA_DIR" --shell /bin/bash "$GALAXIA_USER"
+	else
+		useradd --system --user-group --home-dir "$GALAXIA_DIR" --create-home --shell /bin/bash "$GALAXIA_USER"
 	fi
 }
 
@@ -248,8 +255,12 @@ install_update_runtime() {
 	fi
 	install -m 0644 "$svc_src" /etc/systemd/system/galaxia-update.service
 	install -m 0644 "$tmr_src" /etc/systemd/system/galaxia-update.timer
-	systemctl daemon-reload
-	systemctl enable --now galaxia-update.timer >/dev/null 2>&1 || true
+	# `daemon-reload` peut échouer dans un container sans systemd live (CI E2E).
+	# Best-effort : si systemd ne tourne pas, les units sont posées et seront
+	# activées au prochain boot avec un vrai PID 1.
+	systemctl daemon-reload >/dev/null 2>&1 || warn "systemctl daemon-reload indisponible — units posées mais pas chargées."
+	systemctl enable --now galaxia-update.timer >/dev/null 2>&1 \
+		|| warn "systemctl enable --now galaxia-update.timer indisponible — activera au prochain boot."
 
 	log "galaxia-update installé (binaire /usr/local/bin/galaxia-update, timer 03:30 +rand 15 min)"
 	if [ ! -s "$GALAXIA_DIR/keys/galaxia-os.pub" ]; then
@@ -360,6 +371,25 @@ SUMMARY
 }
 
 main() {
+	# Mode test : utilisé par le CI E2E pour valider le câblage de install.sh
+	# (layout /opt/galaxia, /usr/local/bin, etc.) sans lancer docker/caddy/ollama/nemoclaw
+	# qui sont impossibles à exécuter dans un container Docker simple.
+	if [ "${GALAXIA_INSTALL_TEST_MODE:-0}" = "1" ]; then
+		warn "GALAXIA_INSTALL_TEST_MODE=1 — skip docker/caddy/ollama/nemoclaw + skip verify."
+		require_root
+		require_ubuntu_debian
+		check_resources || true
+		apt-get update >/dev/null
+		ensure_user
+		install_cosign
+		bootstrap_galaxia_dir
+		install_cli
+		# run_wizard utilise NON_INTERACTIVE — laissé au CI de fournir les env vars
+		run_wizard
+		log "Test mode terminé — pas de verify_services (services non installés)."
+		return 0
+	fi
+
 	log "Démarrage de l'installation Galaxia (galaxie fille)."
 	require_root
 	require_ubuntu_debian
