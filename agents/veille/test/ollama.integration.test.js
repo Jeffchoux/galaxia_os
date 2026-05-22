@@ -18,7 +18,9 @@ async function ollamaUp() {
   }
 }
 
-test('synthesizeItem produces a non-empty FR tldr via local Ollama', { timeout: 60_000 }, async (t) => {
+// CPU inference on llama3.1:8b is slow (~2 tok/s). Use numPredict=30 to keep
+// the test under ~20 s; node:test would kill the suite if we waited 60 s+ here.
+test('synthesizeItem produces a non-empty FR tldr via local Ollama', { timeout: 180_000 }, async (t) => {
   if (!(await ollamaUp())) {
     t.skip('Ollama not reachable at ' + OLLAMA_URL);
     return;
@@ -28,7 +30,7 @@ test('synthesizeItem produces a non-empty FR tldr via local Ollama', { timeout: 
     summary: 'Adds local guardrails, sandboxed execution, MCP tools.',
     url: 'https://example.com/x',
   };
-  const tldr = await synthesizeItem(item);
+  const tldr = await synthesizeItem(item, { numPredict: 30 });
   assert.equal(typeof tldr, 'string');
   assert.ok(tldr.length > 10, `expected non-trivial tldr, got: "${tldr}"`);
 });

@@ -43,3 +43,7 @@ venv/
 
 # Logs de sandbox d'évaluation (ops/sandbox/*/logs/run-*.log)
 ops/sandbox/*/logs/
+
+# Rapports de veille quotidiens (regénérés chaque jour, voir agents/veille)
+# Le fichier EXAMPLE.md sert d'exemple committé du format attendu.
+docs/veille/20*.md

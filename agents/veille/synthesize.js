@@ -1,9 +1,9 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
 
-// CPU inference (no GPU on OpenJeff) runs ~2 tok/s for llama3.1:8b, so a TLDR
-// of ~80 tokens takes ~40-60s. Keep timeout generous.
-export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_000, numPredict = 90 } = {}) {
+// CPU inference (~2 tok/s on llama3.1:8b). 40 tokens ≈ 20 s. We cap with
+// `stop` sequences too — the model often keeps rambling past the period.
+export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_000, numPredict = 50 } = {}) {
   const prompt = buildPrompt(item);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -16,7 +16,14 @@ export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_
         model: OLLAMA_MODEL,
         prompt,
         stream: false,
-        options: { temperature: 0.2, num_predict: numPredict },
+        options: {
+          temperature: 0.1,
+          num_predict: numPredict,
+          // \n\n catches the moment the model starts a new paragraph (bullet
+          // list, second sentence). A bare \n stops too early when the model
+          // emits a leading newline.
+          stop: ['\n\n', '\n* ', '\n- ', '\n**', 'Titre :', 'Description :', 'Lien :', 'Exemple'],
+        },
       }),
     });
     if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
@@ -28,15 +35,27 @@ export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_
 }
 
 function buildPrompt(item) {
+  // Few-shot pour casser deux travers récurrents de llama3.1:8b sur ce job :
+  // (1) inventer une définition de RAG ("Reconnaissance Automatique de Gestion"…),
+  // (2) ignorer la consigne de longueur et partir en bullet list.
   return [
-    'Tu es l\'agent de veille IA de Galaxia (écosystème IA souverain pour PME).',
-    'Résume l\'item suivant en UNE phrase française de 25 mots max, factuelle, sans préambule, sans guillemets.',
-    'Souligne ce qui est pertinent pour une PME (souveraineté, on-premise, agents, RAG, sécurité, Ollama).',
+    'Tu es l\'agent de veille de Galaxia (IA souveraine pour PME française).',
+    'Produis UNE seule phrase FR de 20 mots max, factuelle, sans bullet, sans markdown, sans définir d\'acronyme.',
+    'Si pertinent, mentionne : on-premise, agents, RAG (génération augmentée), Ollama, sécurité, MCP.',
     '',
+    'Exemple 1 :',
+    'Titre : SnapState – Persistent state for AI agent workflows',
+    'Description : Adds checkpoint/resume for long-running agents.',
+    'TLDR : Outil OSS qui ajoute checkpoint/reprise aux agents IA longue durée — utile pour fiabiliser un agent PME on-premise.',
+    '',
+    'Exemple 2 :',
+    'Titre : Antigravity 2.0 tops the OpenSCAD 3D LLM benchmark',
+    'Description : New benchmark comparing LLMs on 3D modeling tasks.',
+    'TLDR : Nouveau benchmark LLM sur modélisation 3D OpenSCAD ; peu de retombée directe pour une PME hors bureau d\'études.',
+    '',
+    'Maintenant :',
     `Titre : ${item.title}`,
-    item.summary ? `Description : ${item.summary}` : '',
-    item.url ? `Lien : ${item.url}` : '',
-    '',
+    item.summary ? `Description : ${item.summary.slice(0, 400)}` : '',
     'TLDR :',
   ].filter(Boolean).join('\n');
 }
