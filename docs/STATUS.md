@@ -69,7 +69,7 @@ Tout le reste découle de là.
 | 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
 | 3   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Scaffold posé, à brancher                                       |
 | 4   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (Q3)                                    |
-| 5   | Câbler `docker-compose.yml` services + `env_file: .env`  | Dépend du wizard (fait) — prochaine étape concrète              |
+| ✅  | Câbler `docker-compose.yml` services + `env_file: .env`  | Résolu 2026-05-22 (ancre YAML `x-galaxia-env`, `required: false`, smoke-test OK) |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 

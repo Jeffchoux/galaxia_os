@@ -5,16 +5,30 @@
 # à mesure que chaque brique est intégrée. Caddy est exécuté en service
 # système (apt) sur la galaxie mère, mais sera containerisé pour les
 # galaxies filles afin de garantir la reproductibilité.
+#
+# Configuration & secrets : produits par `scripts/wizard.sh` dans
+# /opt/galaxia/config/{galaxia.conf,.env}. L'ancre YAML ci-dessous
+# est mergée dans chaque service via `<<: *galaxia-env`. `required: false`
+# évite que `docker compose` plante quand le wizard n'a pas encore tourné.
+
+x-galaxia-env: &galaxia-env
+  env_file:
+    - path: /opt/galaxia/config/galaxia.conf
+      required: false
+    - path: /opt/galaxia/config/.env
+      required: false
 
 services:
   # placeholder — sera renseigné lors de l'intégration d'OpenClaw
   # openclaw:
+  #   <<: *galaxia-env
   #   image: openclaw/openclaw:latest
   #   restart: unless-stopped
   #   depends_on: [ollama]
 
   # placeholder — NemoClaw (couche sécurité NVIDIA enterprise)
   # nemoclaw:
+  #   <<: *galaxia-env
   #   image: nemoclaw/nemoclaw:latest
   #   restart: unless-stopped
   #   depends_on: [openclaw]
@@ -22,6 +36,7 @@ services:
   # Ollama tourne déjà en service système (apt) — pas containerisé
   # pour la galaxie mère ; sera containerisé pour les galaxies filles.
   noop:
+    <<: *galaxia-env
     image: alpine:3
     command: ["sh", "-c", "echo Galaxia compose stack placeholder; sleep infinity"]
     restart: "no"
