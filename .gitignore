@@ -40,3 +40,6 @@ venv/
 # Claude Code local artefacts (mémoire et settings utilisateur restent locaux)
 .claude/projects/
 .claude/settings.local.json
+
+# Logs de sandbox d'évaluation (ops/sandbox/*/logs/run-*.log)
+ops/sandbox/*/logs/
