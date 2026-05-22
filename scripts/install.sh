@@ -123,17 +123,20 @@ install_nemoclaw() {
 
 	log "Installation de NemoClaw (peut prendre 5-15 min, sandbox build inclus)..."
 	# L'installer doit tourner en compte non-root avec sudo NOPASSWD (cf. CLAUDE.md).
-	sudo -u "${target_user}" bash -lc '
+	# Heredoc quoted-EOF: no expansion in this block (we want literal env vars to
+	# survive across the sudo boundary).
+	sudo -u "${target_user}" bash -l <<-'NEMOCLAW_INSTALL_EOF'
 		set -e
 		export NEMOCLAW_NON_INTERACTIVE=1
 		export NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
 		export NEMOCLAW_PROVIDER=ollama
 		export NEMOCLAW_NO_EXPRESS=1
 		export NEMOCLAW_SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-galaxia-main}"
-		# Téléchargement séparé de l'exécution pour pouvoir retry si curl échoue
+		# Download script before exec so a failed curl is retryable without
+		# half-running the install.
 		curl -fsSL https://www.nvidia.com/nemoclaw.sh -o /tmp/nemoclaw-install.sh
 		bash /tmp/nemoclaw-install.sh
-	'
+	NEMOCLAW_INSTALL_EOF
 
 	# Ajouter ~/.local/bin au PATH du user (NemoClaw installe les binaires là)
 	if [ -f "${home_dir}/.bashrc" ] && ! grep -q '.local/bin' "${home_dir}/.bashrc"; then
