@@ -173,11 +173,61 @@ install_nemoclaw() {
 
 bootstrap_galaxia_dir() {
 	log "Préparation de $GALAXIA_DIR..."
-	mkdir -p "$GALAXIA_DIR"/{config,data,logs,backups}
+	# `current/` recevra le checkout actif (docker-compose.yml + manifeste de
+	# la version installée). `keys/` héberge la clé publique cosign qui sert
+	# de racine de confiance pour vérifier les manifestes (cf. docs/UPDATES.md).
+	mkdir -p "$GALAXIA_DIR"/{config,current,data,logs,backups,keys}
 	chown -R "$GALAXIA_USER:$GALAXIA_USER" "$GALAXIA_DIR"
-	# TODO : pull du dernier snapshot Galaxia depuis $UPDATES_URL
-	# (compose files, manifestes de version, signatures)
-	warn "Pull des artefacts Galaxia : TODO (mécanisme updates pas encore implémenté)"
+	install_update_runtime
+}
+
+install_update_runtime() {
+	# Pose galaxia-update.sh comme binaire système et active le timer
+	# systemd quotidien. Le script peut tourner sans manifeste en place
+	# (il échoue proprement avec une signature absente).
+	local self_dir wrapper_src
+	self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || echo "")"
+	wrapper_src="${self_dir}/galaxia-update.sh"
+
+	if [ -z "$self_dir" ] || [ ! -f "$wrapper_src" ]; then
+		# Mode curl|bash — pull depuis le repo public
+		wrapper_src="$(mktemp -t galaxia-update-XXXXXX.sh)"
+		log "Téléchargement de galaxia-update.sh depuis le repo..."
+		curl -fsSL "${GALAXIA_REPO_RAW}/scripts/galaxia-update.sh" -o "$wrapper_src" \
+			|| { warn "Téléchargement galaxia-update.sh échoué — mécanisme d'update non installé."; return; }
+		head -1 "$wrapper_src" | grep -q '^#!.*bash' \
+			|| { warn "galaxia-update.sh téléchargé n'est pas un script bash — saut."; rm -f "$wrapper_src"; return; }
+	fi
+
+	install -m 0755 "$wrapper_src" /usr/local/bin/galaxia-update
+
+	# Units systemd : disponibles dans le repo pour le mode dev, à télécharger
+	# en mode curl|bash. Volontairement écrites en clair dans /etc/systemd/system/
+	# (pas de symlink vers /opt/galaxia/) pour rester valides même si on
+	# bouge /opt/galaxia/.
+	local svc_src tmr_src
+	svc_src="${self_dir%/scripts}/ops/systemd/galaxia-update.service"
+	tmr_src="${self_dir%/scripts}/ops/systemd/galaxia-update.timer"
+	if [ ! -f "$svc_src" ]; then
+		svc_src="$(mktemp -t galaxia-update-svc-XXXXXX.service)"
+		curl -fsSL "${GALAXIA_REPO_RAW}/ops/systemd/galaxia-update.service" -o "$svc_src" \
+			|| { warn "Téléchargement galaxia-update.service échoué."; return; }
+	fi
+	if [ ! -f "$tmr_src" ]; then
+		tmr_src="$(mktemp -t galaxia-update-tmr-XXXXXX.timer)"
+		curl -fsSL "${GALAXIA_REPO_RAW}/ops/systemd/galaxia-update.timer" -o "$tmr_src" \
+			|| { warn "Téléchargement galaxia-update.timer échoué."; return; }
+	fi
+	install -m 0644 "$svc_src" /etc/systemd/system/galaxia-update.service
+	install -m 0644 "$tmr_src" /etc/systemd/system/galaxia-update.timer
+	systemctl daemon-reload
+	systemctl enable --now galaxia-update.timer >/dev/null 2>&1 || true
+
+	log "galaxia-update installé (binaire /usr/local/bin/galaxia-update, timer 03:30 +rand 15 min)"
+	if [ ! -s "$GALAXIA_DIR/keys/galaxia-os.pub" ]; then
+		warn "Clé publique cosign absente — déposer la clé dans $GALAXIA_DIR/keys/galaxia-os.pub"
+		warn "(distribuée via install.galaxia-os.com une fois la chaîne d'updates en service)"
+	fi
 }
 
 configure_domain() {
@@ -241,23 +291,6 @@ run_wizard() {
 		bash "$wizard_path"
 }
 
-install_update_cron() {
-	# On n'écrit le cron QUE si le binaire existe — sinon cron lance un truc
-	# manquant tous les jours et pollue les logs / mailx pendant des semaines.
-	if [ ! -x /usr/local/bin/galaxia-update ]; then
-		warn "Binaire /usr/local/bin/galaxia-update absent → cron de mise à jour pas installé."
-		warn "Sera mis en place automatiquement quand le mécanisme updates sera livré (cf. docs/UPDATES.md)."
-		return
-	fi
-	log "Installation du cron de mise à jour quotidien..."
-	cat > /etc/cron.d/galaxia-update <<CRON
-# Mise à jour quotidienne de la galaxie fille depuis la galaxie mère
-# Heure pseudo-aléatoire pour éviter les pics de charge côté hub
-30 3 * * * $GALAXIA_USER /usr/local/bin/galaxia-update >> $GALAXIA_DIR/logs/update.log 2>&1
-CRON
-	chmod 644 /etc/cron.d/galaxia-update
-}
-
 verify_services() {
 	log "Vérification des services post-install..."
 	local svc rc=0
@@ -287,8 +320,8 @@ print_summary() {
 ──────────────────────────────────────────────────────────────
  Répertoire   : $GALAXIA_DIR
  Utilisateur  : $GALAXIA_USER
- Updates      : cron quotidien à 03:30 depuis $UPDATES_URL
- Logs         : $GALAXIA_DIR/logs/
+ Updates      : timer systemd galaxia-update.timer (quotidien 03:30 UTC + rand 15 min) → $UPDATES_URL
+ Logs         : $GALAXIA_DIR/logs/  /  journalctl -u galaxia-update.service
 
  Prochaines étapes :
    - Vérifier que les services démarrent : systemctl status docker caddy ollama
@@ -313,7 +346,6 @@ main() {
 	bootstrap_galaxia_dir
 	run_wizard
 	configure_domain
-	install_update_cron
 	verify_services || warn "Certains services ne tournent pas — installation marquée 'à vérifier'."
 	print_summary
 }

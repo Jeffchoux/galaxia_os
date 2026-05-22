@@ -6,10 +6,12 @@ un diff plutôt qu'en éditant `/etc/`.
 
 ## Units disponibles
 
-| Unit                          | Rôle                                        |
-|-------------------------------|---------------------------------------------|
-| `galaxia-veille.service`      | Exécution one-shot du job de veille IA      |
-| `galaxia-veille.timer`        | Déclencheur quotidien (06:30 UTC) du service |
+| Unit                          | Rôle                                                                |
+|-------------------------------|----------------------------------------------------------------------|
+| `galaxia-veille.service`      | Veille IA quotidienne (HN/GitHub/HF/arXiv → Ollama → markdown)       |
+| `galaxia-veille.timer`        | Déclencheur de la veille (06:30 UTC + rand 5 min) — mère uniquement  |
+| `galaxia-update.service`      | Pull + verify + apply d'une mise à jour signée (galaxia-update.sh)   |
+| `galaxia-update.timer`        | Déclencheur d'update (03:30 UTC + rand 15 min) — galaxie fille       |
 
 ## Installation (galaxie mère, OpenJeff)
 
@@ -57,3 +59,25 @@ liste.
 
 À reproduire côté galaxies filles avec les chemins adaptés au layout PME
 (probablement `/opt/galaxia/agents/veille/` quand on packagera).
+
+## Mise à jour Hub & Spoke — galaxia-update.timer (galaxie fille)
+
+Posé automatiquement par `scripts/install.sh` (fonction `install_update_runtime`).
+Pour le poser à la main sur une galaxie fille existante :
+
+```bash
+sudo install -m 0755 /home/galaxia/galaxia-project/scripts/galaxia-update.sh /usr/local/bin/galaxia-update
+sudo install -m 0644 /home/galaxia/galaxia-project/ops/systemd/galaxia-update.service /etc/systemd/system/
+sudo install -m 0644 /home/galaxia/galaxia-project/ops/systemd/galaxia-update.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now galaxia-update.timer
+systemctl list-timers galaxia-update.timer
+```
+
+Pré-requis sur la galaxie fille avant que le timer puisse réussir un cycle :
+- `cosign v2.x` installé (cf. `install.sh` § `install_cosign`)
+- `/opt/galaxia/keys/galaxia-os.pub` présent (clé publique de signature)
+- `updates.galaxia-os.com` accessible (DNS + Caddy côté mère)
+
+Sans ces pré-requis le service échoue proprement (exit 1) et le timer
+retentera le lendemain. Aucun risque d'état "moitié appliqué".

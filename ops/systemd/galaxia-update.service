@@ -1,0 +1,25 @@
+[Unit]
+Description=Galaxia — pull + verify + apply d'une mise à jour signée
+Documentation=https://github.com/Jeffchoux/galaxia_os/blob/main/docs/UPDATES.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=galaxia
+Group=galaxia
+# Le script lit /opt/galaxia/galaxia.conf via dotenv-ish, gère VERSION,
+# docker compose pull/up et logue dans /opt/galaxia/logs/update.log.
+ExecStart=/usr/local/bin/galaxia-update
+# Timeout généreux : un docker pull peut prendre plusieurs minutes la
+# première fois (images core + agent + ollama).
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
+
+# Garde-fous
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/galaxia
+ProtectHome=read-only

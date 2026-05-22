@@ -1,0 +1,18 @@
+[Unit]
+Description=Galaxia — déclenche le pull d'update quotidien (galaxie fille)
+Documentation=https://github.com/Jeffchoux/galaxia_os/blob/main/docs/UPDATES.md
+
+[Timer]
+# Une fois par jour à 03:30 heure du serveur. Heure choisie pour ne pas
+# concurrencer la veille IA de la galaxie mère (06:30 UTC) et pour
+# tomber dans une fenêtre creuse côté trafic PME.
+OnCalendar=*-*-* 03:30:00
+# Rattrape l'occurrence manquée si la machine était éteinte
+Persistent=true
+# Désynchronise jusqu'à 15 min pour ne pas marteler le hub côté mère
+# quand N galaxies filles tirent en même temps.
+RandomizedDelaySec=15min
+Unit=galaxia-update.service
+
+[Install]
+WantedBy=timers.target
