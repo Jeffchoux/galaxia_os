@@ -8,12 +8,13 @@ pour les décisions techniques.
 
 1. **[`BRIEFING.md`](BRIEFING.md)** — briefing officiel de Jeff : vision, public cible, règles de travail (⭐ contrat de base, lire en tout premier)
 2. **Ce fichier** — conventions techniques, garde-fous (5 min)
-3. [`docs/STATUS.md`](docs/STATUS.md) — état réel des services, ce qui marche, ce qui bloque
-4. [`QUESTIONS_POUR_JEFF.md`](QUESTIONS_POUR_JEFF.md) — questions business en attente (seul canal vers Jeff)
-5. [`docs/STACK.md`](docs/STACK.md) — composition technique détaillée
-6. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — schéma Hub & Spoke
-7. [`docs/UPDATES.md`](docs/UPDATES.md) — mécanisme de release proposé
-8. **Ta mémoire Claude** — voir § Mémoire ci-dessous (⚠️ piège du double compte)
+3. [`docs/PRODUCT-VISION.md`](docs/PRODUCT-VISION.md) — cap stratégique (Galaxia > Claude Code chat+cowork+code, multimodal voix/écrit, souverain)
+4. [`docs/STATUS.md`](docs/STATUS.md) — état réel des services, ce qui marche, ce qui bloque
+5. [`QUESTIONS_POUR_JEFF.md`](QUESTIONS_POUR_JEFF.md) — questions business en attente (seul canal vers Jeff)
+6. [`docs/STACK.md`](docs/STACK.md) — composition technique détaillée
+7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — schéma Hub & Spoke
+8. [`docs/UPDATES.md`](docs/UPDATES.md) — mécanisme de release proposé
+9. **Ta mémoire Claude** — voir § Mémoire ci-dessous (⚠️ piège du double compte)
 
 Le repo est la **source de vérité partagée**. Si tu apprends quelque chose qui
 doit survivre entre sessions ET entre comptes Unix, écris-le ici, pas en mémoire.
