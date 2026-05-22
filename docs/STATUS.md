@@ -7,12 +7,14 @@
 
 Si tu viens d'ouvrir une session dans ce repo, lis dans cet ordre (5 min) :
 
-1. **Ce fichier** — état réel des services et du travail
-2. [`../CLAUDE.md`](../CLAUDE.md) — conventions, garde-fous, piège mémoire
-3. [`STACK.md`](STACK.md) — composition technique (OpenClaw + NemoClaw + Ollama)
-4. [`ARCHITECTURE.md`](ARCHITECTURE.md) — schéma Hub & Spoke
-5. [`UPDATES.md`](UPDATES.md) — mécanisme de release proposé
-6. **Ta mémoire Claude** (voir CLAUDE.md § mémoire — attention au double compte root/galaxia)
+1. [`../BRIEFING.md`](../BRIEFING.md) — ⭐ briefing officiel de Jeff (vision + règles de travail)
+2. **Ce fichier** — état réel des services et du travail à date
+3. [`../CLAUDE.md`](../CLAUDE.md) — conventions techniques, garde-fous, piège mémoire
+4. [`../QUESTIONS_POUR_JEFF.md`](../QUESTIONS_POUR_JEFF.md) — questions business ouvertes
+5. [`STACK.md`](STACK.md) — composition technique (OpenClaw + NemoClaw + Ollama)
+6. [`ARCHITECTURE.md`](ARCHITECTURE.md) — schéma Hub & Spoke
+7. [`UPDATES.md`](UPDATES.md) — mécanisme de release proposé
+8. **Ta mémoire Claude** (voir CLAUDE.md § mémoire — attention au double compte root/galaxia)
 
 Tout le reste découle de là.
 
