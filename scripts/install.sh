@@ -96,6 +96,28 @@ install_ollama() {
 	curl -fsSL https://ollama.com/install.sh | sh
 }
 
+install_cosign() {
+	# cosign v2 — vérifie les manifestes de mise à jour signés par la mère.
+	# Voir scripts/galaxia-update.sh + docs/UPDATES.md § POC pour le contexte.
+	# On pin une version connue plutôt que "latest" — la chaîne de confiance
+	# de Galaxia se brise si cosign change de format de signature en silence.
+	local target_version="v2.4.3"
+	if command -v cosign >/dev/null 2>&1; then
+		local current
+		current=$(cosign version 2>&1 | awk -F: '/GitVersion/ {print $2}' | tr -d ' ')
+		if [ "$current" = "$target_version" ]; then
+			log "cosign $target_version déjà présent."
+			return
+		fi
+		warn "cosign $current présent mais on vise $target_version — remplacement."
+	fi
+	log "Installation de cosign $target_version..."
+	curl -fsSL "https://github.com/sigstore/cosign/releases/download/${target_version}/cosign-linux-amd64" \
+		-o /tmp/cosign-galaxia
+	install -m 0755 /tmp/cosign-galaxia /usr/local/bin/cosign
+	rm -f /tmp/cosign-galaxia
+}
+
 install_nemoclaw() {
 	# Recipe découverte le 2026-05-22 sur OpenJeff. Voir docs/STATUS.md §NemoClaw.
 	# L'installer crée son propre subnet Docker (172.19.0.0/16) et expose le
@@ -286,6 +308,7 @@ main() {
 	install_docker
 	install_caddy
 	install_ollama
+	install_cosign
 	install_nemoclaw
 	bootstrap_galaxia_dir
 	run_wizard
