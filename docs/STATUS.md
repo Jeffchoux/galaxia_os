@@ -36,6 +36,19 @@ Tout le reste découle de là.
 - `https://app.galaxia-os.com/` — page placeholder (file_server)
 - `https://galaxia-os.com/` → 301 vers `https://app.galaxia-os.com/`
 
+## Co-locataires sur OpenJeff (hors repo Galaxia)
+
+OpenJeff héberge aussi des projets clients de Jeff, séparés de Galaxia mais
+partageant le même Caddy/UFW. Documentés ici pour qu'une future session ne
+soit pas surprise de voir un service inconnu.
+
+| Projet           | Service systemd | Frontal              | Code           | Logs / rapport build              |
+|------------------|-----------------|----------------------|----------------|-----------------------------------|
+| BabyRun **Lina** (call center vocal Twilio↔OpenAI) | `lina.service` (loaded; disabled; inactive — attend `/opt/lina/.env`) | Caddy vhost `lina.babyrun.re` (auto-TLS) | `/opt/lina/` (owner `lina:lina`) | `/var/log/lina-build.log` (trace pas-à-pas) + `/root/RAPPORT-LINA.md` (rapport final, clés à coller, procédure de démarrage) |
+
+Règle : **rien de spécifique à un projet client ne va dans le repo Galaxia**.
+Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
+
 ## DNS galaxia-os.com (registrar OVH)
 
 | Sous-domaine  | Propagé ?  | Caddy vhost   |
