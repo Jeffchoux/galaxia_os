@@ -4,6 +4,18 @@ Ce fichier est lu automatiquement par Claude Code dans toute conversation
 ouverte dans ce dépôt. Il sert de mémoire partagée du projet et de garde-fous
 pour les décisions techniques.
 
+## ⚡ Bootstrap (à lire en premier par tout nouvel agent)
+
+1. **Ce fichier** — projet, conventions, garde-fous (5 min)
+2. [`docs/STATUS.md`](docs/STATUS.md) — état réel des services, ce qui marche, ce qui bloque, ce qu'il reste à faire
+3. [`docs/STACK.md`](docs/STACK.md) — composition technique détaillée
+4. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — schéma Hub & Spoke
+5. [`docs/UPDATES.md`](docs/UPDATES.md) — mécanisme de release proposé
+6. **Ta mémoire Claude** — voir § Mémoire ci-dessous (⚠️ piège du double compte)
+
+Le repo est la **source de vérité partagée**. Si tu apprends quelque chose qui
+doit survivre entre sessions ET entre comptes Unix, écris-le ici, pas en mémoire.
+
 ## Projet
 
 **Galaxia** = écosystème IA souverain, open-source et gratuit pour PME.
@@ -75,7 +87,20 @@ Toujours signer avec `Co-Authored-By: Claude Opus 4.7 ...` quand Claude Code com
 ### Mémoire & docs
 
 - Documentation produit : `docs/`
-- Mémoire Claude (par session) : `~/.claude/projects/-home-galaxia-galaxia-project/memory/`
+- Mémoire Claude par session : `~/.claude/projects/-home-galaxia-galaxia-project/memory/`
+
+#### ⚠️ Piège du double compte Unix
+
+Deux utilisateurs travaillent sur ce projet, et **leurs mémoires Claude ne sont pas partagées** :
+
+| Compte    | Quand l'utiliser                          | Mémoire Claude                                                       |
+|-----------|-------------------------------------------|----------------------------------------------------------------------|
+| `galaxia` | Compte de travail principal (sudo NOPASSWD) | `/home/galaxia/.claude/projects/-home-galaxia-galaxia-project/memory/` |
+| `root`    | Install système, urgences, audit          | `/root/.claude/projects/<cwd>/memory/`                               |
+
+Une session ouverte en root **ne voit pas** ce que la session galaxia a appris, et inversement.
+Solution : tout ce qui doit traverser les comptes vit **dans ce repo** (CLAUDE.md + docs/).
+La mémoire Claude reste pour des préférences fines ou des notes éphémères propres à un compte.
 
 ## Commandes utiles
 
@@ -104,3 +129,21 @@ cd /opt/n8n && docker-compose ps
 - **Jeff est manager non-développeur** — expliquer les décisions techniques en langage métier, présenter des choix avec tradeoffs business
 - En cas de blocage qui nécessite une action que seul Jeff peut faire (compte tiers, DNS, paiement), exposer clairement quoi faire et continuer sur d'autres fronts en attendant
 - Mettre à jour ce fichier quand une convention nouvelle est établie
+- **Mettre à jour `docs/STATUS.md`** quand l'état des services change ou qu'un item est résolu
+
+## Garde-fous spécifiques
+
+### NemoClaw / OpenClaw — chaîne d'origine à vérifier
+
+Les sources d'install de NemoClaw présentent plusieurs signaux suspects (cf.
+[`docs/STATUS.md`](docs/STATUS.md) § Préoccupation). **Aucun `curl ... | bash`
+de NemoClaw ne doit être exécuté** sans avoir d'abord téléchargé le script,
+l'avoir lu, et idéalement l'exécuter dans un container Docker `--network=none`.
+
+### Connaissances post-cutoff
+
+Le knowledge cutoff de Claude est antérieur à la date courante de plusieurs mois.
+Pour tout outil/produit/lib que tu ne connais pas : **WebSearch puis WebFetch
+d'abord** (sans demander à Jeff), forme une hypothèse, et **garde un œil critique**
+(typosquatting, SEO spam, contenu halluciné par le summarizer de WebFetch,
+installeurs malveillants).
