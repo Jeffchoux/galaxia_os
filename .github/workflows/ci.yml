@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck (scripts/*.sh, ops/**/*.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          # SC1091: ne pas suivre les sources externes (fichiers .env générés)
+          # SC2155: declare+assign séparé — trop intrusif pour notre style bash
+          shellcheck \
+            --severity=warning \
+            --exclude=SC1091,SC2155 \
+            scripts/install.sh \
+            scripts/wizard.sh \
+            ops/sandbox/nemoclaw/run.sh
+
+  veille-tests:
+    name: agents/veille tests (offline subset)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run tests (Ollama integration test self-skips when unreachable)
+        working-directory: agents/veille
+        run: node --test test/*.test.js
+
+  compose-validate:
+    name: docker compose config (env_file optional, anchor merge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate without wizard-produced files
+        run: |
+          # Should succeed even though /opt/galaxia/config/.env doesn't exist
+          # thanks to required: false on the env_file entries.
+          docker compose --profile never config > /tmp/compose-rendered.yml
+          grep -q 'name: galaxia-project' /tmp/compose-rendered.yml
+          grep -q 'noop' /tmp/compose-rendered.yml
+      - name: Validate with wizard-produced files present
+        run: |
+          sudo mkdir -p /opt/galaxia/config
+          printf 'GALAXIA_PRIVACY_MODE=local\nGALAXIA_LLM_PROVIDER=ollama\n' | sudo tee /opt/galaxia/config/galaxia.conf >/dev/null
+          printf '# no secrets in local mode\n' | sudo tee /opt/galaxia/config/.env >/dev/null
+          sudo chown -R "$USER:$USER" /opt/galaxia/config
+          sudo chmod 600 /opt/galaxia/config/.env
+          docker compose --profile never config
+
+  wizard-dryrun:
+    name: scripts/wizard.sh non-interactive (ollama path)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run wizard in non-interactive mode (no API key needed in local mode)
+        env:
+          GALAXIA_NON_INTERACTIVE: '1'
+          GALAXIA_CONFIG_DIR: ${{ runner.temp }}/galaxia-config
+          GALAXIA_PRIVACY_MODE: local
+          GALAXIA_LLM_PROVIDER: ollama
+          GALAXIA_DOMAIN: ''
+          GALAXIA_DASHBOARD_MODE: tunnel
+          GALAXIA_WAKE_WORD: 'Hey Galaxia'
+        run: bash scripts/wizard.sh
+      - name: Assert config files were produced
+        run: |
+          test -f "${{ runner.temp }}/galaxia-config/galaxia.conf"
+          test -f "${{ runner.temp }}/galaxia-config/.env"
+          # .env should be chmod 600
+          [ "$(stat -c '%a' "${{ runner.temp }}/galaxia-config/.env")" = "600" ]
+          # config must contain the chosen provider
+          grep -q '^GALAXIA_LLM_PROVIDER=ollama$' "${{ runner.temp }}/galaxia-config/galaxia.conf"
