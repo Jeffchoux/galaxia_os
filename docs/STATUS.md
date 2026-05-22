@@ -80,13 +80,14 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | ✅  | Q6 stockage clés API                                     | Résolu 2026-05-22 (.env chmod 600 par défaut, autonomie)        |
 | ✅  | Câbler `docker-compose.yml` services + `env_file: .env`  | Résolu 2026-05-22 (ancre YAML `x-galaxia-env`, `required: false`, smoke-test OK) |
 | ✅  | Module de veille IA quotidien (HN, GitHub, arxiv, HF)    | Résolu 2026-05-22 — systemd timer actif (06:30 UTC) + 4 sources |
-| ✅  | CI GitHub Actions (shellcheck + tests + compose + wizard) | Résolu 2026-05-22 — 4 jobs verts                                |
+| ✅  | CI GitHub Actions (shellcheck + tests + compose + wizard) | Résolu 2026-05-22 — 4 jobs verts + 1 job cosign round-trip      |
 | ✅  | `scripts/install.sh` durci pour `curl \| bash` public      | Résolu 2026-05-22 — wizard download fallback, healthcheck, cron sécurisé |
 | ✅  | `scripts/health.sh` — bilan santé une page (console/quiet/json) | Résolu 2026-05-22                                         |
+| ✅  | POC mécanisme d'updates (client + serveur + cosign)      | Résolu 2026-05-22 — `galaxia-update.sh` (fille) + `galaxia-publish.sh` (mère) + CI round-trip |
+| ✅  | `bootstrap_galaxia_dir` + timer `galaxia-update.timer`   | Résolu 2026-05-22 — `install_update_runtime()` pose binaire+units, daemon-reload, enable timer |
 | 1   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
-| 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3                              |
-| 3   | POC `bootstrap_galaxia_dir` (pull manifest + verify)     | En cours — POC indépendant du choix A/B/C (signature cosign)    |
-| 4   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
+| 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
+| 3   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 

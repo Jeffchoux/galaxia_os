@@ -60,6 +60,13 @@ if systemctl list-unit-files galaxia-veille.timer >/dev/null 2>&1 \
 	ok "galaxia-veille.timer" "prochain tir : ${next}"
 fi
 
+# Timer update — uniquement attendu sur les galaxies filles (mais bénin sur la mère)
+if systemctl list-unit-files galaxia-update.timer >/dev/null 2>&1 \
+		&& systemctl is-enabled --quiet galaxia-update.timer 2>/dev/null; then
+	next=$(systemctl show -p NextElapseUSecRealtime --value galaxia-update.timer 2>/dev/null || echo '?')
+	ok "galaxia-update.timer" "prochain tir : ${next}"
+fi
+
 section "API Ollama (:11434)"
 
 if curl -fsS --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
@@ -90,6 +97,33 @@ if [ -f "$CONFIG_DIR/.env" ]; then
 	fi
 else
 	warn ".env" "absent — pas de secrets enregistrés"
+fi
+
+section "Mise à jour Hub & Spoke (galaxie fille)"
+
+# /usr/local/bin/galaxia-update doit exister sur une fille — bénin sur la mère.
+if [ -x /usr/local/bin/galaxia-update ]; then
+	ok "galaxia-update binaire" "/usr/local/bin/galaxia-update"
+fi
+
+# La clé publique cosign embarquée — racine de confiance des updates
+PUBKEY="$GALAXIA_DIR/keys/galaxia-os.pub"
+if [ -f "$PUBKEY" ]; then
+	if [ -s "$PUBKEY" ] && head -1 "$PUBKEY" | grep -q 'PUBLIC KEY'; then
+		ok "cosign pubkey" "$PUBKEY"
+	else
+		warn "cosign pubkey" "$PUBKEY existe mais semble vide ou mal formé"
+	fi
+else
+	# Bénin sur la mère ; warn sur une fille car elle ne pourra pas vérifier les updates.
+	if [ -x /usr/local/bin/galaxia-update ]; then
+		warn "cosign pubkey" "$PUBKEY absent — galaxia-update échouera (signature non vérifiable)"
+	fi
+fi
+
+# Version installée
+if [ -f "$GALAXIA_DIR/VERSION" ]; then
+	ok "VERSION installée" "$(cat "$GALAXIA_DIR/VERSION")"
 fi
 
 section "Veille IA (galaxie mère)"
