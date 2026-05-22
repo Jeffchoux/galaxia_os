@@ -93,6 +93,56 @@ install_ollama() {
 	curl -fsSL https://ollama.com/install.sh | sh
 }
 
+install_nemoclaw() {
+	# Recipe découverte le 2026-05-22 sur OpenJeff. Voir docs/STATUS.md §NemoClaw.
+	# L'installer crée son propre subnet Docker (172.19.0.0/16) et expose le
+	# gateway OpenShell sur 172.19.0.1:8080 + auth proxy Ollama sur 172.19.0.1:11435.
+	# UFW doit explicitement autoriser le trafic du subnet vers ces deux ports
+	# sinon les sandboxes ne peuvent pas atteindre leur propre gateway.
+
+	local target_user="${GALAXIA_USER}"
+	local home_dir
+	home_dir="$(getent passwd "${target_user}" | cut -d: -f6)"
+	[ -n "$home_dir" ] || die "Utilisateur ${target_user} sans home dir."
+
+	# Skip si déjà installé (idempotent)
+	if [ -x "${home_dir}/.local/bin/nemoclaw" ]; then
+		log "NemoClaw déjà présent ($("${home_dir}/.local/bin/nemoclaw" --version 2>&1))."
+		return
+	fi
+
+	# Prérequis Node 22.19+ (l'installer NemoClaw vérifie et installe NVM sinon)
+	if ! command -v node >/dev/null 2>&1; then
+		log "Node absent — NemoClaw installer va installer NVM + Node 24."
+	fi
+
+	log "Pré-ouverture UFW pour le subnet sandbox NemoClaw (172.19.0.0/16)..."
+	# 8080 = OpenShell gateway ; 11435 = Ollama auth proxy
+	ufw allow from 172.19.0.0/16 to 172.19.0.1 port 8080 proto tcp comment "NemoClaw OpenShell gateway" >/dev/null
+	ufw allow from 172.19.0.0/16 to 172.19.0.1 port 11435 proto tcp comment "NemoClaw Ollama auth proxy" >/dev/null
+
+	log "Installation de NemoClaw (peut prendre 5-15 min, sandbox build inclus)..."
+	# L'installer doit tourner en compte non-root avec sudo NOPASSWD (cf. CLAUDE.md).
+	sudo -u "${target_user}" bash -lc '
+		set -e
+		export NEMOCLAW_NON_INTERACTIVE=1
+		export NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
+		export NEMOCLAW_PROVIDER=ollama
+		export NEMOCLAW_NO_EXPRESS=1
+		export NEMOCLAW_SANDBOX_NAME="${NEMOCLAW_SANDBOX_NAME:-galaxia-main}"
+		# Téléchargement séparé de l'exécution pour pouvoir retry si curl échoue
+		curl -fsSL https://www.nvidia.com/nemoclaw.sh -o /tmp/nemoclaw-install.sh
+		bash /tmp/nemoclaw-install.sh
+	'
+
+	# Ajouter ~/.local/bin au PATH du user (NemoClaw installe les binaires là)
+	if [ -f "${home_dir}/.bashrc" ] && ! grep -q '.local/bin' "${home_dir}/.bashrc"; then
+		echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${home_dir}/.bashrc"
+	fi
+
+	log "NemoClaw installé. Binaires : ${home_dir}/.local/bin/{nemoclaw,openshell}"
+}
+
 bootstrap_galaxia_dir() {
 	log "Préparation de $GALAXIA_DIR..."
 	mkdir -p "$GALAXIA_DIR"/{config,data,logs,backups}
@@ -163,6 +213,7 @@ main() {
 	install_docker
 	install_caddy
 	install_ollama
+	install_nemoclaw
 	bootstrap_galaxia_dir
 	configure_domain
 	install_update_cron

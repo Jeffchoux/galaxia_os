@@ -117,4 +117,38 @@ Impact : UX du wizard + sécu locale chez la PME.
 
 Décision : install via Docker isolé d'abord (script téléchargé sans pipe, lu, puis exécuté en sandbox).
 
-→ Vérification chaîne d'origine faite, légitime (Akamai NVIDIA → GitHub NVIDIA/NemoClaw). Voir [`docs/STATUS.md`](docs/STATUS.md) § Préoccupation pour le détail. En cours d'install dans Docker au moment de la rédaction.
+→ Vérification chaîne d'origine faite, légitime (Akamai NVIDIA → GitHub NVIDIA/NemoClaw). Sandbox d'éval dans `ops/sandbox/nemoclaw/` a confirmé le comportement de l'installer. Install sur OpenJeff effectuée : `nemoclaw v0.0.48` + `openshell v0.0.39` opérationnels, sandbox `galaxia-main` Ready, inference routée vers Ollama llama3.1:8b. Voir [`docs/STATUS.md`](docs/STATUS.md) § NemoClaw pour le détail.
+
+---
+
+## 8. Accès au dashboard NemoClaw — pattern UI pour Galaxia
+
+**Posée le :** 2026-05-22
+**Statut :** ouverte (impact UX bloquant pour `app.galaxia-os.com`)
+
+NemoClaw n'expose **PAS** son dashboard (port 18789) sur l'hôte par design — c'est dans le sub-namespace réseau du sandbox OpenShell pour des raisons de sécurité (Landlock + isolation). Or le briefing prévoyait `app.galaxia-os.com` comme UI principale de la Galaxia mère, et chaque PME aura besoin de la même chose en local.
+
+Trois options à trancher :
+
+- **A. Cloudflared tunnel (pattern natif NemoClaw)** — `nemoclaw tunnel start` lance un tunnel Cloudflare qui expose le dashboard sur `<sub>.trycloudflare.com` (ou un domaine custom Cloudflare). Marche partout (PME derrière NAT inclus), gratuit pour usage perso, mais dépend d'un service tiers (rompt légèrement la promesse "souverain").
+
+- **B. Reverse proxy Caddy → openshell port-forward** — utiliser `openshell port-forward galaxia-main 18789:18789` (à confirmer si la syntaxe existe) pour exposer le dashboard à l'hôte, puis Caddy `app.galaxia-os.com → 127.0.0.1:18789`. Souverain (rien ne sort), mais nécessite que la PME ait un domaine public + DNS, et donc un setup plus poussé que l'idéal "manager non-tech".
+
+- **C. SSH tunnel local depuis le poste du manager** — pas d'exposition publique, le manager se connecte via `ssh -L 18789:127.0.0.1:18789 galaxia@<ip>` depuis son laptop, et accède via `http://localhost:18789`. Souverain et simple, mais demande un client SSH côté manager (Windows tricky sans gros guide).
+
+**Ma reco :** B + un fallback A pour les PME sans DNS public. Le briefing dit "manager non-tech doit pouvoir installer seul" → A serait plus simple à démarrer, B est la finalité une fois le domaine en place.
+
+Impact : c'est le mode d'accès principal au produit. Tranche en premier sur cette question, le reste de l'UI Galaxia (branding, wizard CLI) découle de là.
+
+---
+
+## 9. Plugin `nemoclaw` du gateway — bug JSON
+
+**Posée le :** 2026-05-22
+**Statut :** info, pas bloquant
+
+Le sandbox tourne avec 4 plugins (browser, device-pair, phone-control, talk-voice) sur 5 prévus — le 5e (`nemoclaw`) échoue à charger : `SyntaxError: Unexpected end of JSON input` lors du register depuis `/sandbox/.openclaw/extensions/nemoclaw/dist/index.js`.
+
+Probablement un bug upstream NemoClaw (early preview 2026-03-16). À reporter sur https://github.com/NVIDIA/NemoClaw/issues, ou à investiguer pour patch local si on en a besoin pour des features Galaxia.
+
+Pas bloquant pour démarrer, mais à suivre.

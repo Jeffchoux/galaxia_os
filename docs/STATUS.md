@@ -20,13 +20,16 @@ Tout le reste découle de là.
 
 ## Services qui tournent (galaxie mère, OpenJeff)
 
-| Service          | État    | Notes                                                                     |
-|------------------|---------|---------------------------------------------------------------------------|
-| Docker           | active  | Daemon OK, 1 container `n8n_n8n_1`                                        |
-| Caddy v2.11.3    | active  | vhosts `app.galaxia-os.com` + redirect apex, TLS Let's Encrypt OK         |
-| Ollama 0.24.0    | active  | `localhost:11434`, modèle `llama3.1:8b` (4.9 GB) chargé                   |
-| fail2ban + UFW   | active  | Ports ouverts : 22, 80, 443, **5678** (à fermer après mise derrière Caddy) |
-| n8n (legacy)     | running | `/opt/n8n/docker-compose.yml`, exposé en clair :5678 (PAS de TLS)          |
+| Service                 | État        | Notes                                                                              |
+|-------------------------|-------------|------------------------------------------------------------------------------------|
+| Docker                  | active      | Daemon OK ; 2 containers (n8n + sandbox NemoClaw `openshell-galaxia-main-*`)      |
+| Caddy v2.11.3           | active      | vhosts `app.galaxia-os.com` + redirect apex, TLS Let's Encrypt OK                  |
+| Ollama 0.24.0           | active      | `localhost:11434`, llama3.1:8b chargé, override systemd `OLLAMA_HOST=127.0.0.1:11434` |
+| NemoClaw v0.0.48        | installed   | CLI `/home/galaxia/.local/bin/nemoclaw`, version 0.0.48                            |
+| OpenShell v0.0.39       | running     | Gateway sur `127.0.0.1:8080` et `172.19.0.1:8080`, sandbox `galaxia-main` Ready    |
+| Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
+| fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
+| n8n (legacy)            | running     | `/opt/n8n/docker-compose.yml`, exposé en clair :5678 (PAS de TLS)                  |
 
 ## Endpoints publics actifs
 
@@ -75,6 +78,44 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJv64EzJXt45JQgxdOjWDeDshz2qXHYu0i1iu6zfTzhK
 | 6   | Wizard CLI manager-friendly (FR, choix LLM/wake word)   | Pas commencé                                                   |
 | 7   | Module de veille IA quotidien (HN, GitHub, arxiv)        | Pas commencé                                                   |
 | 8   | Implémenter `bootstrap_galaxia_dir` (pull updates)       | Dépend du choix updates (A/B/C)                                |
+
+## NemoClaw — état d'install détaillé (2026-05-22)
+
+**Install réussi** sur OpenJeff (compte `galaxia`) après vérif chaîne d'origine.
+
+### Composants opérationnels
+
+- `nemoclaw v0.0.48` installé via `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash` (env vars : `NEMOCLAW_NON_INTERACTIVE=1`, `NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1`, `NEMOCLAW_PROVIDER=ollama`, `NEMOCLAW_SANDBOX_NAME=galaxia-main`)
+- `openshell v0.0.39` (CLI rust) à `~/.local/bin/openshell`, déjà avec verif SHA-256 lors du download
+- Sandbox `galaxia-main` créé (image `openshell/sandbox-from:1779412425`, 74 steps de build, ~15 min)
+- Gateway OpenClaw tournant dans le sandbox, modèle `inference/llama3.1:8b`, 4 plugins chargés (browser, device-pair, phone-control, talk-voice)
+- Inference routée vers Ollama local via `inference.local` (DNS alias géré par le gateway)
+
+### Quirks observés
+
+1. **Docker healthcheck reporte "unhealthy"** : la healthcheck `curl 127.0.0.1:18789/health` tourne dans le namespace réseau du wrapper container, mais le gateway tourne dans le sub-namespace OpenShell. Le 18789 est volontairement non exposé sur l'hôte. À débugger ou à accepter comme normal.
+
+2. **Plugin `nemoclaw` échoue à se charger dans le gateway** : `SyntaxError: Unexpected end of JSON input` sur `/sandbox/.openclaw/extensions/nemoclaw/dist/index.js`. Les 4 autres plugins fonctionnent. Bug à reporter upstream ou à investiguer.
+
+3. **Dashboard non exposé à l'hôte par design.** L'accès passe par :
+   - `nemoclaw tunnel start` (cloudflared tunnel — pattern NemoClaw natif)
+   - OU port-forward via `docker exec` / openshell port-forward
+   - OU configuration Caddy pour proxy via openshell gateway
+
+   **Implication pour Galaxia** : le briefing prévoyait `app.galaxia-os.com` comme UI principale. Soit on intègre cloudflared, soit on configure un reverse proxy Caddy qui pointe vers le sandbox interne via openshell. Question pour Jeff dans `QUESTIONS_POUR_JEFF.md`.
+
+### UFW rules ajoutées (à reproduire côté galaxies filles)
+
+```
+ufw allow from 172.19.0.0/16 to 172.19.0.1 port 8080 proto tcp   # OpenShell gateway
+ufw allow from 172.19.0.0/16 to 172.19.0.1 port 11435 proto tcp  # Ollama auth proxy
+```
+
+Ces deux règles sont désormais dans `scripts/install.sh` → `install_nemoclaw()` pour les galaxies filles.
+
+### Logs d'install
+
+`ops/logs/nemoclaw-*.log` (4 fichiers, root-owned car lancés depuis cette session root).
 
 ## Vérification de la chaîne d'origine NemoClaw (2026-05-22)
 
