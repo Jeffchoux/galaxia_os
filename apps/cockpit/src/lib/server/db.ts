@@ -9,6 +9,8 @@ export interface Conversation {
 	title: string;
 	created_at: number;
 	updated_at: number;
+	summary: string | null;
+	summary_until_idx: number;
 }
 
 export interface Message {
@@ -37,6 +39,9 @@ function prepare(db: Database.Database) {
 			'UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?'
 		),
 		touchConversation: db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?'),
+		updateSummary: db.prepare(
+			'UPDATE conversations SET summary = ?, summary_until_idx = ?, updated_at = ? WHERE id = ?'
+		),
 		listMessages: db.prepare<[string], Message>(
 			'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC'
 		),
@@ -44,6 +49,18 @@ function prepare(db: Database.Database) {
 			'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
 		)
 	};
+}
+
+function migrate(db: Database.Database) {
+	const cols = new Set<string>(
+		(db.pragma('table_info(conversations)') as Array<{ name: string }>).map((c) => c.name)
+	);
+	if (!cols.has('summary')) {
+		db.exec('ALTER TABLE conversations ADD COLUMN summary TEXT');
+	}
+	if (!cols.has('summary_until_idx')) {
+		db.exec('ALTER TABLE conversations ADD COLUMN summary_until_idx INTEGER NOT NULL DEFAULT 0');
+	}
 }
 
 function stmts() {
@@ -58,7 +75,9 @@ function stmts() {
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT 'Nouvelle conversation',
 			created_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL
+			updated_at INTEGER NOT NULL,
+			summary TEXT,
+			summary_until_idx INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE TABLE IF NOT EXISTS messages (
 			id TEXT PRIMARY KEY,
@@ -70,6 +89,7 @@ function stmts() {
 		CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
 		CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC);
 	`);
+	migrate(_db);
 	_stmts = prepare(_db);
 	return _stmts;
 }
@@ -87,7 +107,14 @@ export function createConversation(title?: string): Conversation {
 	const id = randomUUID();
 	const t = title ?? 'Nouvelle conversation';
 	stmts().createConversation.run(id, t, now, now);
-	return { id, title: t, created_at: now, updated_at: now };
+	return {
+		id,
+		title: t,
+		created_at: now,
+		updated_at: now,
+		summary: null,
+		summary_until_idx: 0
+	};
 }
 
 export function renameConversation(id: string, title: string): void {
@@ -96,6 +123,10 @@ export function renameConversation(id: string, title: string): void {
 
 export function touchConversation(id: string): void {
 	stmts().touchConversation.run(Date.now(), id);
+}
+
+export function updateSummary(id: string, summary: string, summary_until_idx: number): void {
+	stmts().updateSummary.run(summary, summary_until_idx, Date.now(), id);
 }
 
 export function listMessages(conversationId: string): Message[] {
