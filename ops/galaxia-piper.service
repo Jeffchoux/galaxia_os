@@ -1,0 +1,30 @@
+[Unit]
+Description=Galaxia — Piper TTS daemon (HTTP server résident, voix fr_FR-siwis-medium)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/opt/galaxia/piper-voices
+# `python -m piper.http_server` charge le modèle ONNX une seule fois, écoute
+# sur 127.0.0.1:5500 et synthétise à la demande via POST avec body texte.
+ExecStart=/home/galaxia/.claude/galaxia/venv/bin/python -m piper.http_server \
+    --host 127.0.0.1 \
+    --port 5500 \
+    --model /opt/galaxia/piper-voices/fr_FR-siwis-medium.onnx
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/galaxia/piper-voices /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
