@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-23** (cockpit V1 livré sur `app.galaxia-os.com` — SvelteKit + Claude streaming).
+> Dernière révision : **2026-05-23 (fin de journée)** — les 5 étapes de [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §4 sont en V1 (cockpit web, voix in/out + wake word, memory, MCP, cowork V1). Détail dans § *Cockpit* plus bas.
 
 ## Bootstrap éclair pour un nouvel agent
 
@@ -30,8 +30,9 @@ Tout le reste découle de là.
 | Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
 | fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
 | n8n (legacy)            | stopped     | Arrêté le 2026-05-22 (Jeff ne se souvenait pas de l'usage), volume `n8n_n8n_data` conservé |
-| Cockpit Galaxia V1      | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db` |
-| Cockpit dashboard NemoClaw | active   | `galaxia-nemoclaw-dashboard.service` restaure le tunnel SSH `127.0.0.1:18789` au boot (Caddy `nemoclaw.galaxia-os.com`) |
+| Cockpit Galaxia         | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db`. Voix (Web Speech) + wake word + VAD + cowork V1 + memory + MCP. |
+| Piper TTS daemon        | active      | `galaxia-piper.service` daemon HTTP local FR souverain consommé par `/api/tts` (≈5× plus rapide que spawn shell par requête) |
+| Cockpit dashboard NemoClaw | enabled (inactive — pas rebooté depuis création de l'unit 2026-05-23 08:12) | `galaxia-nemoclaw-dashboard.service` doit restaurer le tunnel SSH `127.0.0.1:18789` au prochain boot ; le tunnel actuel a été démarré à la main et `nemoclaw.galaxia-os.com` répond 200 OK |
 
 ## Endpoints publics actifs
 
@@ -95,30 +96,58 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | ✅  | E2E install.sh dans container Ubuntu fresh              | Résolu 2026-05-22 — `ops/e2e/Dockerfile` + `run-test.sh`, 22/22 assertions, job CI `install-e2e` |
 | ✅  | Quand 1er module appelant Claude API arrive : skill `/claude-api` | Résolu 2026-05-23 — cockpit V1 (`apps/cockpit/`) consomme `@anthropic-ai/sdk` en streaming SSE |
 | ✅  | Cockpit V1 (texte) sur `app.galaxia-os.com`             | Résolu 2026-05-23 — SvelteKit + adapter-node, auth password+session HMAC, chat Claude streaming, persistance SQLite, Dockerfile pour les filles |
-| 1   | Memory tool + MCP côté cockpit (étape 2 de PRODUCT-VISION) | Pas encore commencé — préalable à la voix selon la stratégie d'ordre |
-| 2   | Voix in/out + wake word (étape 4 de PRODUCT-VISION)     | Bloque sur Memory/MCP livrés                                       |
+| ✅  | Memory tool + MCP côté cockpit (étape 2 de PRODUCT-VISION) | Résolu 2026-05-23 — auto-résumé conversations + `memory.md`, organisation Haiku v2.1, MCP servers filesystem (fixe) + GitHub/Brave (conditionnels) + Galaxia maison (stdio) |
+| ✅  | Voix in/out + wake word (étape 4 de PRODUCT-VISION)     | Résolu 2026-05-23 — Web Speech STT fr-FR, TTS streaming par phrase, wake word « Hey Galaxia » (regex sur SpeechRecognition), VAD hands-free, TTS premium Piper local FR via daemon HTTP |
+| ✅  | Cowork V1 (étape 5 de PRODUCT-VISION)                   | Résolu 2026-05-23 — upload PDF/Markdown/TXT attaché à la conversation, vision Claude pour photos (JPG/PNG/WEBP/GIF), preview docs joints (modal iframe), onglet Documents + onglet Briefs |
+| ✅  | Browser smoke test cockpit                              | Résolu 2026-05-23 — `ops/browser-smoke/test.mjs` Playwright headless 12 assertions vertes, non branché en CI (besoin cookie session) |
+| ✅  | Bot Telegram dans le repo                               | Résolu 2026-05-23 — `agents/telegram/` (était hors repo, désormais versionné)                                                  |
+| 1   | Installation PME pilote (1ère galaxie fille réelle)     | Pré-req tous livrés (Docker packaging, install.sh, wizard, cockpit complet). Bloque sur identification d'une PME pilote (Jeff) |
+| 2   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
+| 3   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
+| 4   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
+| 5   | Plugin `nemoclaw` du gateway — bug JSON                 | Pas bloquant ; à reporter upstream NVIDIA quand on en a besoin pour une feature (cf. Q9) |
 
-## Cockpit V1 — détail d'exploitation (2026-05-23)
+## Cockpit — détail d'exploitation (2026-05-23 fin de journée)
 
-**Premier livrable utilisable**. Pose la première brique du produit décrit dans [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §3 : le cockpit web texte. La voix, le wake word et le cowork s'ajouteront par-dessus.
+**Cockpit complet livré en une journée.** Couvre les 5 couches de [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §4 en V1.
 
 ### Stack
 
 - **SvelteKit 2 + Svelte 5** (runes `$state` / `$props`), `@sveltejs/adapter-node` → binaire Node standalone derrière Caddy.
 - **`@anthropic-ai/sdk`** en streaming SSE (modèle par défaut `claude-opus-4-7`, surchargeable via `COCKPIT_MODEL`). Le coder agent reste sur `claude-agent-sdk` car il a besoin de tools ; le cockpit chat-only utilise le SDK basique, plus léger.
+- **`@modelcontextprotocol/sdk`** + serveurs MCP officiels (filesystem, GitHub, Brave) + serveur Galaxia maison (`apps/mcp-galaxia/`).
 - **`better-sqlite3`** pour la persistance des conversations (`data/cockpit.db`, mode WAL).
 - **`@node-rs/argon2`** pour le hash du mot de passe, **HMAC SHA-256** maison pour signer le cookie de session (pas de JWT lib).
+- **`marked`** pour le rendu Markdown (briefs + memory).
+- **Web Speech API** côté navigateur pour STT (fr-FR) et TTS streaming par phrase ; **Piper TTS** local FR via daemon HTTP pour TTS souverain premium.
+
+### Fonctionnalités V1 (toutes livrées 2026-05-23)
+
+| Couche PRODUCT-VISION §4   | Couverture cockpit                                                                                                                                                     |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Module client Claude (1)   | Streaming SSE Claude Opus 4.7, modèle surchargeable                                                                                                                    |
+| Memory + MCP (2)           | Memory tool : auto-résumé des conversations dans `memory.md`, Haiku v2.1 réorganise les sections au lieu d'append. Tools : `update_memory`, `read_brief`, `list_briefs`. MCP servers : filesystem (toujours), GitHub + Brave (conditionnels sur PAT/clé), Galaxia maison (stdio) |
+| Interface web cockpit (3)  | Routes : `/` (chat principal), `/briefs` (sidebar + viewer markdown), `/documents` (onglet dédié), `/login`, `/logout`, `/api/{chat,conversations,documents,tts}`     |
+| Voix in/out + wake word (4)| STT Web Speech fr-FR, TTS streaming phrase par phrase, wake word « Hey Galaxia » (regex sur SpeechRecognition), VAD hands-free (interruption naturelle), TTS premium Piper FR via daemon |
+| Cowork V1 (5)              | Upload PDF/Markdown/TXT attaché à la conversation, vision Claude pour photos (JPG/PNG/WEBP/GIF), preview docs joints (modal iframe natif)                              |
 
 ### Composants
 
 | Bloc                          | Chemin                                                          |
 |-------------------------------|-----------------------------------------------------------------|
-| Code                          | `apps/cockpit/`                                                 |
-| Service systemd               | `/etc/systemd/system/galaxia-cockpit.service` (source : `ops/galaxia-cockpit.service`) |
+| Code cockpit                  | `apps/cockpit/`                                                 |
+| MCP server Galaxia            | `apps/mcp-galaxia/` (stdio, expose Galaxia au monde MCP)        |
+| Bot Telegram                  | `agents/telegram/`                                              |
+| Agent coder                   | `agents/coder/`                                                 |
+| Agent veille IA               | `agents/veille/`                                                |
+| Service systemd cockpit       | `/etc/systemd/system/galaxia-cockpit.service` (source : `ops/galaxia-cockpit.service`) |
+| Service systemd Piper         | `/etc/systemd/system/galaxia-piper.service`                     |
 | Caddy vhost                   | `app.galaxia-os.com` (reverse_proxy 127.0.0.1:3001)             |
 | Image Docker (filles PME)     | `galaxia/cockpit:latest` — service `cockpit` dans `docker-compose.yml` (profile `cockpit`) |
 | Secrets                       | `apps/cockpit/.env` (chmod 600, owner galaxia, **gitignored**)  |
 | DB                            | `apps/cockpit/data/cockpit.db` (créée au premier démarrage)     |
+| Memory persistante            | `apps/cockpit/data/memory.md`                                   |
+| Smoke test                    | `ops/browser-smoke/test.mjs` (Playwright headless, 12 assertions) |
 
 ### Accès
 
@@ -142,12 +171,13 @@ sudo systemctl restart galaxia-cockpit.service      # restart (kick deploy aprè
 sudo -u galaxia bash -lc 'cd ~/galaxia-project/apps/cockpit && npm run build'  # rebuild après edit du code
 ```
 
-### Limites volontaires du V1 (à reprendre selon PRODUCT-VISION)
+### Limites restantes V1 (couches V2 à venir selon PRODUCT-VISION)
 
-- Pas de Memory tool (chaque conversation est indépendante côté Claude — seul l'historique de la même conversation est rejoué)
-- Pas de voix / wake word
-- Pas d'upload de documents ni de cowork (édition multi-fichiers, screenshare)
-- Pas de multi-user (Jeff seul) — quand on ouvre aux PME, on bascule l'auth sur magic link/OAuth
+- **Cowork** = upload de fichiers attachés au chat seulement. Pas encore d'édition multi-fichiers live, pas de screenshare API, pas d'observation de l'écran (étape la plus complexe d'après §3.4)
+- **Voix** repose sur Web Speech API du navigateur (Chrome/Edge OK, Safari partiel, Firefox limité). Pour souveraineté totale côté STT, prochaine étape : Whisper local (whisper.cpp) en remplacement de SpeechRecognition côté serveur
+- **Wake word** = filtre regex sur SpeechRecognition (suffit en V1) ; Picovoice Porcupine prévu en V2 pour wake word natif basse latence
+- **Multi-user** = Jeff seul (single password). Quand on ouvre aux PME, basculer sur magic link / OAuth
+- **Memory** côté Claude est `memory.md` global, pas par projet / par conversation (suffit pour V1, à compartimenter quand la PME a plusieurs collaborateurs)
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 
