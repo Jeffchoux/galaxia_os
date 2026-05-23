@@ -59,9 +59,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			let assistantText = '';
 			try {
-				for await (const chunk of streamReply(convAtTurnStart, history, docs)) {
-					assistantText += chunk;
-					send('delta', { text: chunk });
+				for await (const event of streamReply(convAtTurnStart, history, docs)) {
+					if (event.kind === 'delta') {
+						assistantText += event.text;
+						send('delta', { text: event.text });
+					} else if (event.kind === 'tool_use') {
+						send('tool_use', { id: event.id, name: event.name, input: event.input });
+					} else if (event.kind === 'tool_result') {
+						send('tool_result', {
+							id: event.id,
+							name: event.name,
+							result: event.result,
+							is_error: event.is_error ?? false
+						});
+					}
 				}
 				appendMessage(conversation.id, 'assistant', assistantText);
 
