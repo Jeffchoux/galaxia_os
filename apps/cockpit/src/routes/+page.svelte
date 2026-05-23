@@ -478,6 +478,7 @@
 
 	function docIcon(mime: string): string {
 		if (mime === 'application/pdf') return '📄';
+		if (mime.startsWith('image/')) return '🖼️';
 		if (mime.includes('markdown')) return '📝';
 		return '📃';
 	}
@@ -685,7 +686,7 @@
 				<input
 					type="file"
 					bind:this={fileInput}
-					accept="application/pdf,text/plain,text/markdown,.md,.markdown,.txt,.pdf"
+					accept="application/pdf,text/plain,text/markdown,image/jpeg,image/png,image/webp,image/gif,.md,.markdown,.txt,.pdf,.jpg,.jpeg,.png,.webp,.gif"
 					multiple
 					style="display: none"
 					onchange={(e) => {
@@ -698,7 +699,7 @@
 					class="attach"
 					onclick={() => fileInput?.click()}
 					disabled={uploading || sending}
-					title="Joindre PDF / Markdown / TXT (drag-drop accepté)"
+					title="Joindre PDF / Markdown / TXT / Image (drag-drop accepté)"
 					aria-label="Joindre un document"
 				>
 					{uploading ? '…' : '📎'}
@@ -742,7 +743,7 @@
 			</form>
 
 			{#if dragOver}
-				<div class="drag-overlay">Lâche ici — PDF / Markdown / TXT</div>
+				<div class="drag-overlay">Lâche ici — PDF / Markdown / TXT / Image</div>
 			{/if}
 		</div>
 	</main>

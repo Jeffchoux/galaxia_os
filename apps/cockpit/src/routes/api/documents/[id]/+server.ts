@@ -43,11 +43,12 @@ export const GET: RequestHandler = ({ params, url, locals }) => {
 	const doc = getDocument(params.id);
 	if (!doc || doc.conversation_id !== convId) throw error(404, 'document not found');
 
-	if (doc.mime_type === 'application/pdf' && doc.content_b64) {
+	// Binaires (PDF + images) → on sert le contenu natif, le browser sait afficher
+	if (doc.content_b64 && (doc.mime_type === 'application/pdf' || doc.mime_type.startsWith('image/'))) {
 		const buf = Buffer.from(doc.content_b64, 'base64');
 		return new Response(buf, {
 			headers: {
-				'content-type': 'application/pdf',
+				'content-type': doc.mime_type,
 				'content-disposition': `inline; filename="${doc.filename.replace(/"/g, '')}"`,
 				'cache-control': 'private, max-age=300'
 			}

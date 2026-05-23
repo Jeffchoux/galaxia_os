@@ -7,12 +7,21 @@ import {
 
 const MAX_PDF_BYTES = 8 * 1024 * 1024; // 8 MB
 const MAX_TEXT_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB (limite Anthropic vision)
+
+const IMAGE_MIMES = new Set([
+	'image/jpeg',
+	'image/png',
+	'image/webp',
+	'image/gif'
+]);
 
 const ALLOWED_MIME = new Set([
 	'application/pdf',
 	'text/plain',
 	'text/markdown',
-	'text/x-markdown'
+	'text/x-markdown',
+	...IMAGE_MIMES
 ]);
 
 function inferMime(filename: string, declared: string): string {
@@ -21,6 +30,10 @@ function inferMime(filename: string, declared: string): string {
 	if (lower.endsWith('.pdf')) return 'application/pdf';
 	if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'text/markdown';
 	if (lower.endsWith('.txt')) return 'text/plain';
+	if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+	if (lower.endsWith('.png')) return 'image/png';
+	if (lower.endsWith('.webp')) return 'image/webp';
+	if (lower.endsWith('.gif')) return 'image/gif';
 	return declared;
 }
 
@@ -46,11 +59,16 @@ export const POST: RequestHandler = async ({ request, url, locals }) => {
 
 	const mime = inferMime(file.name, file.type);
 	if (!ALLOWED_MIME.has(mime)) {
-		throw error(415, `type non supporté : ${mime || 'inconnu'} (PDF / Markdown / TXT uniquement)`);
+		throw error(
+			415,
+			`type non supporté : ${mime || 'inconnu'} (PDF / Markdown / TXT / Image)`
+		);
 	}
 
 	const isPdf = mime === 'application/pdf';
-	const max = isPdf ? MAX_PDF_BYTES : MAX_TEXT_BYTES;
+	const isImage = IMAGE_MIMES.has(mime);
+	const isBinary = isPdf || isImage;
+	const max = isImage ? MAX_IMAGE_BYTES : isPdf ? MAX_PDF_BYTES : MAX_TEXT_BYTES;
 	if (file.size > max) {
 		throw error(413, `fichier trop gros (max ${Math.floor(max / 1024 / 1024)} Mo)`);
 	}
@@ -62,8 +80,8 @@ export const POST: RequestHandler = async ({ request, url, locals }) => {
 		conversation_id: convId,
 		filename,
 		mime_type: mime,
-		content_text: isPdf ? null : buf.toString('utf-8'),
-		content_b64: isPdf ? buf.toString('base64') : null,
+		content_text: isBinary ? null : buf.toString('utf-8'),
+		content_b64: isBinary ? buf.toString('base64') : null,
 		size: file.size
 	});
 
