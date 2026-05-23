@@ -18,9 +18,16 @@ interface McpServerConfig {
 	name: string;
 	command: string;
 	args: string[];
+	env?: Record<string, string>;
 }
 
+const NODE_MODULES =
+	'/home/galaxia/galaxia-project/apps/cockpit/node_modules/@modelcontextprotocol';
+
 function buildServerConfigs(): McpServerConfig[] {
+	const configs: McpServerConfig[] = [];
+
+	// Filesystem — toujours actif, sauf si COCKPIT_MCP_FS_ROOTS=`-` pour le désactiver.
 	const defaults = [
 		'/home/galaxia/galaxia-project',
 		'/home/galaxia/.claude/galaxia/briefs',
@@ -29,14 +36,29 @@ function buildServerConfigs(): McpServerConfig[] {
 	const roots = (env.COCKPIT_MCP_FS_ROOTS ?? defaults.join(','))
 		.split(',')
 		.map((p) => p.trim())
-		.filter(Boolean);
-	if (roots.length === 0) return [];
+		.filter((p) => p && p !== '-');
+	if (roots.length > 0) {
+		configs.push({
+			name: 'filesystem',
+			command: 'node',
+			args: [`${NODE_MODULES}/server-filesystem/dist/index.js`, ...roots]
+		});
+	}
 
-	// Le binaire JS du server-filesystem ; on l'invoque via node direct (plus
-	// rapide que `npx` + plus déterministe quand on packagera Docker).
-	const fsBin =
-		'/home/galaxia/galaxia-project/apps/cockpit/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js';
-	return [{ name: 'filesystem', command: 'node', args: [fsBin, ...roots] }];
+	// GitHub — actif uniquement si GITHUB_PERSONAL_ACCESS_TOKEN est posé.
+	// PAT à scope minimal : `repo` (read access pour repos privés) ou `public_repo`
+	// (read public). Pour Jeff sur galaxia_os (public), `public_repo` suffit.
+	const ghToken = env.GITHUB_PERSONAL_ACCESS_TOKEN;
+	if (ghToken) {
+		configs.push({
+			name: 'github',
+			command: 'node',
+			args: [`${NODE_MODULES}/server-github/dist/index.js`],
+			env: { GITHUB_PERSONAL_ACCESS_TOKEN: ghToken }
+		});
+	}
+
+	return configs;
 }
 
 interface ConnectedServer {
@@ -54,7 +76,10 @@ async function connectAll(): Promise<ConnectedServer[]> {
 		try {
 			const transport = new StdioClientTransport({
 				command: cfg.command,
-				args: cfg.args
+				args: cfg.args,
+				// Sans `env`, le SDK ne propage QUE PATH par défaut — il faut explicitement
+				// inject les credentials (GITHUB_PERSONAL_ACCESS_TOKEN, etc.).
+				env: { ...process.env, ...cfg.env } as Record<string, string>
 			});
 			const client = new Client(
 				{ name: 'galaxia-cockpit', version: '0.1.0' },
