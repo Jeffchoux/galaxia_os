@@ -29,6 +29,9 @@ must() {
 }
 
 printf '\n=== Phase 1 : install.sh en mode test ===\n'
+# GALAXIA_COCKPIT_PASSWORD : ajouté avec le wizard 2026-05-23 (audit PME).
+# Le wizard refuse de continuer sans, et le hash argon2id finit dans le .env.
+# argon2 (paquet apt) sera installé à la volée par ensure_argon2() du wizard.
 GALAXIA_INSTALL_TEST_MODE=1 \
 GALAXIA_NON_INTERACTIVE=1 \
 GALAXIA_PRIVACY_MODE=local \
@@ -36,6 +39,7 @@ GALAXIA_LLM_PROVIDER=ollama \
 GALAXIA_DOMAIN='' \
 GALAXIA_DASHBOARD_MODE=tunnel \
 GALAXIA_WAKE_WORD='Hey Galaxia' \
+GALAXIA_COCKPIT_PASSWORD='e2e-test-password-not-used-in-prod' \
 	bash /src/scripts/install.sh
 
 printf '\n=== Phase 2 : assertions filesystem ===\n'
@@ -53,6 +57,16 @@ must '/opt/galaxia/config/galaxia.conf exists'   test -f /opt/galaxia/config/gal
 must '/opt/galaxia/config/.env exists'           test -f /opt/galaxia/config/.env
 must '/opt/galaxia/config/.env is chmod 600'     bash -c '[ "$(stat -c %a /opt/galaxia/config/.env)" = 600 ]'
 must 'galaxia.conf has the chosen provider'      grep -q '^GALAXIA_LLM_PROVIDER=ollama$' /opt/galaxia/config/galaxia.conf
+
+# Secrets cockpit (ajoutés par le wizard 2026-05-23) — sans ces 2 lignes,
+# le cockpit refuse de démarrer car son auth.ts / env.ts lèvent une exception.
+must '.env has JEFF_PASS_HASH (argon2id PHC)'    grep -Eq '^JEFF_PASS_HASH=\$argon2id\$' /opt/galaxia/config/.env
+must '.env has SESSION_SECRET (≥ 32 chars)'      bash -c 'v=$(grep "^SESSION_SECRET=" /opt/galaxia/config/.env | cut -d= -f2-); [ "${#v}" -ge 32 ]'
+must 'argon2 binary installed (wizard pulled it)' command -v argon2
+
+# Mode tunnel (GALAXIA_DOMAIN vide) : ni COCKPIT_DOMAIN ni ACME_EMAIL dans .env
+must '.env sans COCKPIT_DOMAIN (mode tunnel)'    bash -c '! grep -q "^COCKPIT_DOMAIN=" /opt/galaxia/config/.env'
+must '.env sans ACME_EMAIL (mode tunnel)'        bash -c '! grep -q "^ACME_EMAIL=" /opt/galaxia/config/.env'
 
 # CLI + helpers
 must '/usr/local/bin/galaxia is executable'      test -x /usr/local/bin/galaxia
