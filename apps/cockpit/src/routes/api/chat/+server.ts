@@ -4,9 +4,31 @@ import {
 	createConversation,
 	getConversation,
 	listMessages,
-	renameConversation
+	renameConversation,
+	updateSummary,
+	type Conversation
 } from '$lib/server/db';
-import { generateTitle, streamReply, toClaudeMessages } from '$lib/server/claude';
+import {
+	generateTitle,
+	shouldSummarize,
+	streamReply,
+	summarizeHistory
+} from '$lib/server/claude';
+
+async function maybeSummarize(conversation: Conversation): Promise<void> {
+	try {
+		const refreshed = getConversation(conversation.id);
+		if (!refreshed) return;
+		const history = listMessages(refreshed.id);
+		if (!shouldSummarize(refreshed, history)) return;
+		const { summary, until_idx } = await summarizeHistory(refreshed, history);
+		if (summary && until_idx > refreshed.summary_until_idx) {
+			updateSummary(refreshed.id, summary, until_idx);
+		}
+	} catch (e) {
+		console.error('summarize failed', e);
+	}
+}
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
@@ -20,6 +42,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!conversation) conversation = createConversation();
 
 	appendMessage(conversation.id, 'user', userMessage);
+	// Refresh conversation after appending (summary/summary_until_idx untouched here)
+	const convAtTurnStart = getConversation(conversation.id) ?? conversation;
 	const history = listMessages(conversation.id);
 
 	const encoder = new TextEncoder();
@@ -33,7 +57,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			let assistantText = '';
 			try {
-				for await (const chunk of streamReply(toClaudeMessages(history))) {
+				for await (const chunk of streamReply(convAtTurnStart, history)) {
 					assistantText += chunk;
 					send('delta', { text: chunk });
 				}
@@ -45,6 +69,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					send('title', { title });
 				}
 				send('done', { ok: true });
+
+				// Résumé asynchrone (non bloquant pour le client : le stream est déjà fermé en dessous)
+				maybeSummarize(conversation);
 			} catch (e) {
 				const msg = e instanceof Error ? e.message : String(e);
 				if (assistantText) {

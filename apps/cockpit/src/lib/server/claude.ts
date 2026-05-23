@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getAnthropicKey, getModel } from './env';
-import type { Message as DbMessage } from './db';
+import { loadMemory } from './memory';
+import type { Conversation, Message as DbMessage } from './db';
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -8,7 +9,7 @@ function client(): Anthropic {
 	return _client;
 }
 
-const SYSTEM_PROMPT = `Tu es Galaxia, l'IA du cockpit de Jeff (créateur du projet Galaxia, manager non-développeur).
+const BASE_SYSTEM = `Tu es Galaxia, l'IA du cockpit de Jeff (créateur du projet Galaxia, manager non-développeur).
 
 Galaxia est un écosystème IA souverain, open-source et gratuit pour PME : chaque PME l'installe sur son propre serveur avec ses propres clés API. Tu es le cockpit de la galaxie mère (OpenJeff). Tu parles en français par défaut.
 
@@ -19,18 +20,94 @@ export interface ChatTurn {
 	content: string;
 }
 
-export function toClaudeMessages(history: DbMessage[]): ChatTurn[] {
-	return history.map((m) => ({ role: m.role, content: m.content }));
+// Combien de messages récents on garde toujours non-résumés.
+const KEEP_RECENT = 8;
+// Au-delà de ce seuil de messages dans la conversation, on déclenche le résumé.
+const SUMMARIZE_THRESHOLD = 20;
+// Au-delà de ce seuil de tokens d'historique, idem (heuristique : ~4 chars/token).
+const SUMMARIZE_CHAR_THRESHOLD = 32_000;
+
+export function buildSystemPrompt(conversation: Conversation | null): string {
+	const parts = [BASE_SYSTEM];
+	const memory = loadMemory();
+	if (memory) {
+		parts.push(`---\n\nMémoire persistante (édite via le fichier memory.md sur le serveur) :\n\n${memory}`);
+	}
+	if (conversation?.summary) {
+		parts.push(`---\n\nRésumé de la partie ancienne de cette conversation (les messages plus récents suivent en clair) :\n\n${conversation.summary}`);
+	}
+	return parts.join('\n\n');
+}
+
+export function buildClaudeMessages(
+	conversation: Conversation | null,
+	history: DbMessage[]
+): ChatTurn[] {
+	const fromIdx = conversation?.summary_until_idx ?? 0;
+	const slice = fromIdx > 0 ? history.slice(fromIdx) : history;
+	return slice.map((m) => ({ role: m.role, content: m.content }));
+}
+
+export function shouldSummarize(
+	conversation: Conversation | null,
+	history: DbMessage[]
+): boolean {
+	if (!conversation) return false;
+	const unsummarized = history.length - (conversation.summary_until_idx ?? 0);
+	if (unsummarized < KEEP_RECENT + 4) return false;
+	if (history.length < SUMMARIZE_THRESHOLD) {
+		// Test secondaire : taille caractères des unsummarized
+		const chars = history.slice(conversation.summary_until_idx ?? 0)
+			.reduce((acc, m) => acc + m.content.length, 0);
+		if (chars < SUMMARIZE_CHAR_THRESHOLD) return false;
+	}
+	return true;
+}
+
+export async function summarizeHistory(
+	conversation: Conversation,
+	history: DbMessage[]
+): Promise<{ summary: string; until_idx: number }> {
+	const fromIdx = conversation.summary_until_idx ?? 0;
+	const toIdx = history.length - KEEP_RECENT; // on garde KEEP_RECENT récents
+	if (toIdx <= fromIdx) return { summary: conversation.summary ?? '', until_idx: fromIdx };
+
+	const toSummarize = history.slice(fromIdx, toIdx);
+	const previousSummary = conversation.summary
+		? `Résumé précédent à intégrer :\n\n${conversation.summary}\n\n---\n\n`
+		: '';
+
+	const transcript = toSummarize
+		.map((m) => `${m.role === 'user' ? 'Jeff' : 'Galaxia'} : ${m.content}`)
+		.join('\n\n');
+
+	const result = await client().messages.create({
+		model: 'claude-haiku-4-5-20251001',
+		max_tokens: 1500,
+		system:
+			'Tu résumes des échanges entre Jeff et Galaxia pour préserver le contexte sans dépasser le budget tokens. Garde : (1) les faits décidés/actés, (2) les préférences exprimées, (3) les chantiers ouverts et leur état. Style : puces, dense, factuel, français. Pas de meta-commentaire.',
+		messages: [
+			{
+				role: 'user',
+				content: `${previousSummary}Échanges à condenser (du plus ancien au plus récent) :\n\n${transcript}`
+			}
+		]
+	});
+
+	const block = result.content[0];
+	const summary = block?.type === 'text' ? block.text.trim() : '';
+	return { summary, until_idx: toIdx };
 }
 
 export async function* streamReply(
-	messages: ChatTurn[]
+	conversation: Conversation | null,
+	history: DbMessage[]
 ): AsyncGenerator<string, void, unknown> {
 	const stream = client().messages.stream({
 		model: getModel(),
 		max_tokens: 4096,
-		system: SYSTEM_PROMPT,
-		messages
+		system: buildSystemPrompt(conversation),
+		messages: buildClaudeMessages(conversation, history)
 	});
 
 	for await (const event of stream) {
