@@ -65,6 +65,13 @@
 	let wakeFlash = $state(false); // mini feedback visuel quand le wake est détecté
 	const WAKE_RE = /^\s*(hey\s+|hé\s+|eh\s+|ok\s+|salut\s+)?galaxia[\s,.!?:;]*(.*)$/i;
 
+	// Backend TTS : 'browser' (instant, voix native, Google Cloud côté Chrome)
+	// ou 'piper' (~2s latence par phrase, voix locale fr_FR-siwis, souverain).
+	let ttsBackend = $state<'browser' | 'piper'>('browser');
+	let piperQueue: string[] = [];
+	let piperPumpRunning = false;
+	let currentPiperAudio: HTMLAudioElement | null = null;
+
 	onMount(() => {
 		if (typeof window === 'undefined') return;
 		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -73,6 +80,8 @@
 		// Restaure les préférences voix
 		try {
 			wakeWord = localStorage.getItem('galaxia.wakeWord') === '1';
+			const tb = localStorage.getItem('galaxia.ttsBackend');
+			if (tb === 'piper' || tb === 'browser') ttsBackend = tb;
 		} catch {
 			/* localStorage indispo */
 		}
@@ -82,6 +91,7 @@
 		try {
 			if (typeof window !== 'undefined') {
 				localStorage.setItem('galaxia.wakeWord', wakeWord ? '1' : '0');
+				localStorage.setItem('galaxia.ttsBackend', ttsBackend);
 			}
 		} catch {
 			/* idem */
@@ -179,7 +189,13 @@
 	}
 
 	function speakChunk(text: string) {
-		if (!voiceMode || !voiceSupported.tts || !text.trim()) return;
+		if (!voiceMode || !text.trim()) return;
+		if (ttsBackend === 'piper') {
+			piperQueue.push(text);
+			void pumpPiperQueue();
+			return;
+		}
+		if (!voiceSupported.tts) return;
 		const u = new SpeechSynthesisUtterance(text);
 		u.lang = 'fr-FR';
 		u.rate = 1.05;
@@ -200,9 +216,62 @@
 		window.speechSynthesis.speak(u);
 	}
 
+	async function pumpPiperQueue() {
+		if (piperPumpRunning) return;
+		piperPumpRunning = true;
+		speaking = true;
+		try {
+			while (piperQueue.length > 0 && ttsBackend === 'piper' && voiceMode) {
+				const text = piperQueue.shift()!;
+				try {
+					const res = await fetch('/api/tts', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ text })
+					});
+					if (!res.ok) {
+						// Piper down → fallback transparent vers TTS browser
+						if (res.status === 503) {
+							ttsBackend = 'browser';
+							errorMsg = 'Piper non disponible — bascule sur la voix navigateur.';
+						}
+						continue;
+					}
+					const blob = await res.blob();
+					const url = URL.createObjectURL(blob);
+					const audio = new Audio(url);
+					currentPiperAudio = audio;
+					await new Promise<void>((resolve) => {
+						audio.onended = () => resolve();
+						audio.onerror = () => resolve();
+						audio.play().catch(() => resolve());
+					});
+					URL.revokeObjectURL(url);
+					currentPiperAudio = null;
+				} catch (e) {
+					errorMsg = e instanceof Error ? e.message : String(e);
+				}
+			}
+		} finally {
+			piperPumpRunning = false;
+			speaking = false;
+			if (voiceMode && !listening && !sending) {
+				setTimeout(() => {
+					if (voiceMode && !listening && !sending) toggleListening();
+				}, 60);
+			}
+		}
+	}
+
 	function stopSpeaking() {
 		if (typeof window === 'undefined') return;
 		window.speechSynthesis.cancel();
+		piperQueue = [];
+		if (currentPiperAudio) {
+			currentPiperAudio.pause();
+			currentPiperAudio.currentTime = 0;
+			currentPiperAudio = null;
+		}
 		speaking = false;
 		ttsBuffer = '';
 	}
@@ -623,6 +692,16 @@
 						⏸ Silence
 					</button>
 				{/if}
+				<button
+					class="voice-toggle"
+					class:on={ttsBackend === 'piper'}
+					onclick={() => (ttsBackend = ttsBackend === 'piper' ? 'browser' : 'piper')}
+					title={ttsBackend === 'piper'
+						? 'Voix Piper local (souverain, ~2s latence/phrase) — clic pour repasser au navigateur'
+						: 'Voix navigateur native (instant, mais transcrit côté Google chez Chrome). Clic pour Piper local.'}
+				>
+					{ttsBackend === 'piper' ? '🎵 Piper' : '🔉 Browser'}
+				</button>
 				<button
 					class="voice-toggle"
 					class:on={wakeWord}
