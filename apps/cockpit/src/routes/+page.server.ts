@@ -1,5 +1,9 @@
 import type { PageServerLoad } from './$types';
-import { listConversations, listMessages } from '$lib/server/db';
+import {
+	listConversationDocuments,
+	listConversations,
+	listMessages
+} from '$lib/server/db';
 import { listBriefs } from '$lib/server/briefs';
 
 export const load: PageServerLoad = ({ url }) => {
@@ -9,11 +13,13 @@ export const load: PageServerLoad = ({ url }) => {
 		? conversations.find((c) => c.id === requestedId)
 		: undefined;
 	const messages = active ? listMessages(active.id) : [];
+	const documents = active ? listConversationDocuments(active.id) : [];
 	const briefs = listBriefs().slice(0, 5);
 	return {
 		conversations,
 		active: active ?? null,
 		messages,
+		documents,
 		briefs
 	};
 };

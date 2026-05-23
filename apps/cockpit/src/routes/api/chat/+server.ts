@@ -4,6 +4,7 @@ import {
 	createConversation,
 	getConversation,
 	listMessages,
+	loadConversationDocuments,
 	renameConversation,
 	updateSummary,
 	type Conversation
@@ -45,6 +46,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// Refresh conversation after appending (summary/summary_until_idx untouched here)
 	const convAtTurnStart = getConversation(conversation.id) ?? conversation;
 	const history = listMessages(conversation.id);
+	const docs = loadConversationDocuments(conversation.id);
 
 	const encoder = new TextEncoder();
 	const stream = new ReadableStream({
@@ -57,7 +59,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			let assistantText = '';
 			try {
-				for await (const chunk of streamReply(convAtTurnStart, history)) {
+				for await (const chunk of streamReply(convAtTurnStart, history, docs)) {
 					assistantText += chunk;
 					send('delta', { text: chunk });
 				}
