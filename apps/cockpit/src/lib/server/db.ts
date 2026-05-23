@@ -61,6 +61,17 @@ function prepare(db: Database.Database) {
 		insertMessage: db.prepare(
 			'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)'
 		),
+		listAllDocs: db.prepare<
+			[number],
+			DocumentMeta & { conversation_title: string }
+		>(
+			`SELECT d.id, d.conversation_id, d.filename, d.mime_type, d.size,
+			        d.uploaded_at, c.title AS conversation_title
+			 FROM documents d
+			 JOIN conversations c ON c.id = d.conversation_id
+			 ORDER BY d.uploaded_at DESC
+			 LIMIT ?`
+		),
 		listDocsMeta: db.prepare<[string], DocumentMeta>(
 			'SELECT id, conversation_id, filename, mime_type, size, uploaded_at FROM documents WHERE conversation_id = ? ORDER BY uploaded_at ASC'
 		),
@@ -183,6 +194,14 @@ export function appendMessage(
 
 export function listConversationDocuments(conversationId: string): DocumentMeta[] {
 	return stmts().listDocsMeta.all(conversationId);
+}
+
+export interface DocumentWithConv extends DocumentMeta {
+	conversation_title: string;
+}
+
+export function listAllDocuments(limit = 200): DocumentWithConv[] {
+	return stmts().listAllDocs.all(Math.max(1, Math.min(500, limit)));
 }
 
 export function loadConversationDocuments(conversationId: string): Document[] {

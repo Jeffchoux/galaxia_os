@@ -662,6 +662,10 @@
 			{/if}
 		</nav>
 
+		<div class="sidebar-extras">
+			<a href="/documents" class="extras-link">📂 Tous les documents →</a>
+		</div>
+
 		<div class="briefs-section">
 			<div class="briefs-head">
 				<span>Briefs récents</span>
@@ -1023,6 +1027,22 @@
 		padding: 0.5rem;
 		color: #555;
 		font-size: 0.85rem;
+	}
+	.sidebar-extras {
+		padding-top: 0.5rem;
+		border-top: 1px solid rgba(124, 58, 237, 0.15);
+	}
+	.extras-link {
+		display: block;
+		padding: 0.5rem 0.6rem;
+		font-size: 0.8rem;
+		color: #b9b9d0;
+		text-decoration: none;
+		border-radius: 6px;
+	}
+	.extras-link:hover {
+		background: rgba(124, 58, 237, 0.08);
+		color: #fff;
 	}
 	.briefs-section {
 		display: flex;
