@@ -103,6 +103,113 @@ install_ollama() {
 	curl -fsSL https://ollama.com/install.sh | sh
 }
 
+install_piper() {
+	# Piper TTS local FR (souverain) — daemon HTTP résident sur 127.0.0.1:5500.
+	# Cohérent avec le code cockpit (apps/cockpit/src/routes/api/tts/+server.ts)
+	# qui attend par défaut un daemon à PIPER_DAEMON_URL=http://127.0.0.1:5500/.
+	#
+	# Strictement optionnel : si Piper n'est pas là, le cockpit retombe sur la
+	# synthèse vocale du navigateur (Web Speech API). On l'installe quand même
+	# par défaut pour offrir la voix souveraine annoncée dans PRODUCT-VISION.
+	#
+	# Skip via env var (utile en CI E2E où on n'a ni Python venv ni 60MB de modèle) :
+	#   GALAXIA_SKIP_PIPER=1
+	if [ "${GALAXIA_SKIP_PIPER:-0}" = "1" ]; then
+		warn "Piper TTS sauté (GALAXIA_SKIP_PIPER=1)."
+		return
+	fi
+
+	local venv_dir="${GALAXIA_PIPER_VENV:-/opt/galaxia/venv}"
+	local voices_dir="${GALAXIA_PIPER_VOICES:-/opt/galaxia/piper-voices}"
+	local model_url="https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx"
+	local json_url="${model_url}.json"
+	local model_path="${voices_dir}/fr_FR-siwis-medium.onnx"
+	local json_path="${model_path}.json"
+
+	# Skip si déjà installé (idempotent — vérifie venv + binaire piper + modèle).
+	if [ -x "${venv_dir}/bin/piper" ] && [ -s "$model_path" ] && [ -s "$json_path" ]; then
+		log "Piper TTS déjà présent (${venv_dir} + modèle FR siwis-medium)."
+		# S'assure quand même que l'unit est en place pour les nouvelles installs
+		# qui auraient le venv mais pas encore le service.
+		install_piper_systemd "$venv_dir" "$model_path"
+		return
+	fi
+
+	log "Installation de Piper TTS (≈ 80 MB, modèle ONNX FR siwis-medium)..."
+	apt-get install -y python3-venv python3-pip >/dev/null
+
+	mkdir -p "$venv_dir" "$voices_dir"
+	chown "$GALAXIA_USER:$GALAXIA_USER" "$venv_dir" "$voices_dir"
+
+	# Le venv et le pip install tournent en compte galaxia pour que les
+	# fichiers soient bien possédés par l'utilisateur qui fera tourner le daemon.
+	sudo -u "$GALAXIA_USER" bash -lc "
+		set -euo pipefail
+		python3 -m venv '$venv_dir'
+		'$venv_dir/bin/pip' install --quiet --upgrade pip
+		'$venv_dir/bin/pip' install --quiet piper-tts
+	" || die "Échec création venv / install piper-tts dans $venv_dir"
+
+	# Téléchargement du modèle (≈ 60 MB) et de son JSON de phonèmes.
+	if [ ! -s "$model_path" ]; then
+		log "Téléchargement du modèle voix FR (siwis-medium, ~60MB)..."
+		curl -fsSL "$model_url" -o "$model_path" \
+			|| die "Échec téléchargement modèle Piper ($model_url)"
+	fi
+	if [ ! -s "$json_path" ]; then
+		curl -fsSL "$json_url" -o "$json_path" \
+			|| die "Échec téléchargement JSON Piper ($json_url)"
+	fi
+	chown "$GALAXIA_USER:$GALAXIA_USER" "$model_path" "$json_path"
+
+	install_piper_systemd "$venv_dir" "$model_path"
+
+	log "Piper TTS installé. Daemon : http://127.0.0.1:5500/"
+}
+
+install_piper_systemd() {
+	local venv_dir="$1" model_path="$2"
+	local voices_dir
+	voices_dir="$(dirname "$model_path")"
+
+	# Génère l'unit en substituant les chemins (le fichier dans ops/ est
+	# la version mère, avec un venv dans /home/galaxia/.claude/galaxia/venv).
+	cat > /etc/systemd/system/galaxia-piper.service <<UNIT
+[Unit]
+Description=Galaxia — Piper TTS daemon (HTTP server résident, voix fr_FR-siwis-medium)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${GALAXIA_USER}
+Group=${GALAXIA_USER}
+WorkingDirectory=${voices_dir}
+ExecStart=${venv_dir}/bin/python -m piper.http_server \\
+    --host 127.0.0.1 \\
+    --port 5500 \\
+    --model ${model_path}
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=${voices_dir} /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+	systemctl daemon-reload >/dev/null 2>&1 \
+		|| warn "systemctl daemon-reload indisponible (container sans PID 1 ?) — unit posée."
+	systemctl enable --now galaxia-piper.service >/dev/null 2>&1 \
+		|| warn "systemctl enable --now galaxia-piper.service indisponible — activera au prochain boot."
+}
+
 install_cosign() {
 	# cosign v2 — vérifie les manifestes de mise à jour signés par la mère.
 	# Voir scripts/galaxia-update.sh + docs/UPDATES.md § POC pour le contexte.
@@ -375,7 +482,7 @@ main() {
 	# (layout /opt/galaxia, /usr/local/bin, etc.) sans lancer docker/caddy/ollama/nemoclaw
 	# qui sont impossibles à exécuter dans un container Docker simple.
 	if [ "${GALAXIA_INSTALL_TEST_MODE:-0}" = "1" ]; then
-		warn "GALAXIA_INSTALL_TEST_MODE=1 — skip docker/caddy/ollama/nemoclaw + skip verify."
+		warn "GALAXIA_INSTALL_TEST_MODE=1 — skip docker/caddy/ollama/piper/nemoclaw + skip verify."
 		require_root
 		require_ubuntu_debian
 		check_resources || true
@@ -399,6 +506,7 @@ main() {
 	install_docker
 	install_caddy
 	install_ollama
+	install_piper
 	install_cosign
 	install_nemoclaw
 	bootstrap_galaxia_dir
