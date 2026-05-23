@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { tick } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import type { PageData } from './$types';
 
 	interface Props {
@@ -20,6 +20,128 @@
 	let errorMsg = $state<string | null>(null);
 	let scrollEl: HTMLElement | undefined = $state();
 
+	// ─── voix ──────────────────────────────────────────────────────────────
+	let voiceMode = $state(false);
+	let listening = $state(false);
+	let speaking = $state(false);
+	let interim = $state('');
+	let voiceSupported = $state({ stt: false, tts: false });
+	let recognition: any = null; // SpeechRecognition (browser-only)
+	let ttsBuffer = ''; // accumulé pendant le stream pour découper en phrases TTS
+
+	onMount(() => {
+		if (typeof window === 'undefined') return;
+		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+		voiceSupported.stt = !!SR;
+		voiceSupported.tts = !!window.speechSynthesis;
+	});
+
+	function getRecognition(): any {
+		if (recognition) return recognition;
+		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+		if (!SR) return null;
+		const r = new SR();
+		r.lang = 'fr-FR';
+		r.interimResults = true;
+		r.continuous = false;
+		r.maxAlternatives = 1;
+
+		r.onresult = (event: any) => {
+			let finalTranscript = '';
+			let interimTranscript = '';
+			for (let i = event.resultIndex; i < event.results.length; i++) {
+				const transcript = event.results[i][0].transcript;
+				if (event.results[i].isFinal) finalTranscript += transcript;
+				else interimTranscript += transcript;
+			}
+			if (interimTranscript) interim = interimTranscript;
+			if (finalTranscript) {
+				draft = (draft + ' ' + finalTranscript).trim();
+				interim = '';
+			}
+		};
+		r.onend = () => {
+			listening = false;
+			interim = '';
+			// En voiceMode, on envoie automatiquement quand l'écoute se termine
+			if (voiceMode && draft.trim()) {
+				send();
+			}
+		};
+		r.onerror = (e: any) => {
+			listening = false;
+			interim = '';
+			if (e.error !== 'no-speech' && e.error !== 'aborted') {
+				errorMsg = `Micro: ${e.error}`;
+			}
+		};
+		recognition = r;
+		return r;
+	}
+
+	function toggleListening() {
+		if (listening) {
+			recognition?.stop();
+			return;
+		}
+		const r = getRecognition();
+		if (!r) {
+			errorMsg = "Reconnaissance vocale non disponible (Chrome / Edge / Safari requis).";
+			return;
+		}
+		// Interrompre la voix de Galaxia si elle parle (pour pouvoir lui couper la parole)
+		stopSpeaking();
+		errorMsg = null;
+		listening = true;
+		try {
+			r.start();
+		} catch (e) {
+			listening = false;
+			errorMsg = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function speakChunk(text: string) {
+		if (!voiceMode || !voiceSupported.tts || !text.trim()) return;
+		const u = new SpeechSynthesisUtterance(text);
+		u.lang = 'fr-FR';
+		u.rate = 1.05;
+		u.pitch = 1.0;
+		u.onstart = () => (speaking = true);
+		u.onend = () => {
+			// reste en speaking=true tant que la queue n'est pas vide
+			if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
+				speaking = false;
+			}
+		};
+		window.speechSynthesis.speak(u);
+	}
+
+	function stopSpeaking() {
+		if (typeof window === 'undefined') return;
+		window.speechSynthesis.cancel();
+		speaking = false;
+		ttsBuffer = '';
+	}
+
+	function flushTtsBuffer(force = false) {
+		// extrait toutes les phrases complètes du buffer et les TTS-eue
+		const sentenceEnd = /([.!?…\n])\s+/;
+		while (true) {
+			const m = ttsBuffer.match(sentenceEnd);
+			if (!m || m.index === undefined) break;
+			const end = m.index + m[0].length;
+			const sentence = ttsBuffer.slice(0, end).trim();
+			ttsBuffer = ttsBuffer.slice(end);
+			if (sentence) speakChunk(sentence);
+		}
+		if (force && ttsBuffer.trim()) {
+			speakChunk(ttsBuffer.trim());
+			ttsBuffer = '';
+		}
+	}
+
+	// ─── chat ──────────────────────────────────────────────────────────────
 	async function autoscroll() {
 		await tick();
 		if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -32,6 +154,8 @@
 		draft = '';
 		errorMsg = null;
 		sending = true;
+		stopSpeaking(); // au cas où Galaxia parlait encore d'avant
+		ttsBuffer = '';
 
 		turns = [...turns, { role: 'user', content: text }, { role: 'assistant', content: '' }];
 		streamingIndex = turns.length - 1;
@@ -63,6 +187,8 @@
 					handleFrame(frame);
 				}
 			}
+			// Stream terminé : flush la queue TTS avec ce qu'il reste
+			flushTtsBuffer(true);
 		} catch (err) {
 			errorMsg = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -96,6 +222,8 @@
 				role: 'assistant',
 				content: turns[streamingIndex].content + data.text
 			};
+			ttsBuffer += data.text;
+			flushTtsBuffer(false);
 			autoscroll();
 		} else if (event === 'error') {
 			errorMsg = data.message ?? 'Erreur inconnue';
@@ -106,6 +234,7 @@
 		conversationId = null;
 		turns = [];
 		errorMsg = null;
+		stopSpeaking();
 		history.replaceState({}, '', '/');
 	}
 
@@ -118,6 +247,11 @@
 
 	function fmtDate(ts: number): string {
 		return new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
+	}
+
+	function toggleVoiceMode() {
+		voiceMode = !voiceMode;
+		if (!voiceMode) stopSpeaking();
 	}
 </script>
 
@@ -155,17 +289,48 @@
 	<main class="main">
 		<header>
 			<h1>{data.active?.title ?? 'Hey Galaxia, on parle ?'}</h1>
+			<div class="header-actions">
+				{#if speaking}
+					<button class="stop-speak" onclick={stopSpeaking} title="Couper la voix">
+						⏸ Silence
+					</button>
+				{/if}
+				<button
+					class="voice-toggle"
+					class:on={voiceMode}
+					onclick={toggleVoiceMode}
+					disabled={!voiceSupported.tts}
+					title={voiceSupported.tts
+						? voiceMode
+							? 'Voix activée — clic pour repasser en texte'
+							: 'Activer le mode voix (TTS auto sur les réponses)'
+						: 'TTS non supporté par ce navigateur'}
+				>
+					{voiceMode ? '🔊 Voix' : '🔇 Voix'}
+				</button>
+			</div>
 		</header>
 
 		<section class="transcript" bind:this={scrollEl}>
 			{#if turns.length === 0}
 				<div class="welcome">
-					<p>Pose ta question. Réponse en streaming.</p>
+					<p>
+						{#if voiceMode}
+							Clique sur 🎤 et parle.
+						{:else}
+							Pose ta question. Réponse en streaming.
+						{/if}
+					</p>
 				</div>
 			{/if}
 			{#each turns as turn, i (i)}
 				<article class="turn {turn.role}">
-					<div class="role">{turn.role === 'user' ? 'Jeff' : 'Galaxia'}</div>
+					<div class="role">
+						{turn.role === 'user' ? 'Jeff' : 'Galaxia'}
+						{#if turn.role === 'assistant' && speaking && i === turns.length - 1}
+							<span class="speaking-dot"></span>
+						{/if}
+					</div>
 					<div class="content">
 						{#if turn.content}
 							{turn.content}
@@ -181,13 +346,37 @@
 		</section>
 
 		<form class="composer" onsubmit={send}>
-			<textarea
-				bind:value={draft}
-				onkeydown={onKey}
-				placeholder="Écris à Galaxia… (Enter pour envoyer, Shift+Enter pour saut de ligne)"
-				rows="2"
-				disabled={sending}
-			></textarea>
+			<button
+				type="button"
+				class="mic"
+				class:listening
+				onclick={toggleListening}
+				disabled={!voiceSupported.stt || sending}
+				title={voiceSupported.stt
+					? listening
+						? 'Stop'
+						: 'Parler (Chrome/Edge/Safari)'
+					: 'Reconnaissance vocale non supportée par ce navigateur'}
+				aria-label={listening ? 'Arrêter le micro' : 'Démarrer le micro'}
+			>
+				{listening ? '⏹' : '🎤'}
+			</button>
+			<div class="input-wrap">
+				<textarea
+					bind:value={draft}
+					onkeydown={onKey}
+					placeholder={listening
+						? 'Écoute…'
+						: voiceMode
+							? 'Parle (🎤) ou écris…'
+							: 'Écris à Galaxia… (Enter pour envoyer, Shift+Enter pour saut de ligne)'}
+					rows="2"
+					disabled={sending}
+				></textarea>
+				{#if interim}
+					<div class="interim">{interim}</div>
+				{/if}
+			</div>
 			<button type="submit" disabled={sending || !draft.trim()}>
 				{sending ? '…' : 'Envoyer'}
 			</button>
@@ -320,7 +509,11 @@
 		min-width: 0;
 	}
 	header {
-		padding: 1rem 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.75rem 1.5rem;
 		border-bottom: 1px solid rgba(124, 58, 237, 0.15);
 	}
 	header h1 {
@@ -331,6 +524,47 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+		flex: 1;
+	}
+	.header-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+	.voice-toggle {
+		background: rgba(124, 58, 237, 0.1);
+		color: #b9b9d0;
+		border: 1px solid rgba(124, 58, 237, 0.25);
+		padding: 0.4rem 0.75rem;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.voice-toggle:hover:not(:disabled) {
+		background: rgba(124, 58, 237, 0.2);
+		color: #fff;
+	}
+	.voice-toggle.on {
+		background: #7c3aed;
+		color: #fff;
+		border-color: #7c3aed;
+	}
+	.voice-toggle:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.stop-speak {
+		background: rgba(248, 113, 113, 0.15);
+		color: #fca5a5;
+		border: 1px solid rgba(248, 113, 113, 0.4);
+		padding: 0.4rem 0.75rem;
+		border-radius: 8px;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.stop-speak:hover {
+		background: rgba(248, 113, 113, 0.25);
 	}
 
 	.transcript {
@@ -366,6 +600,27 @@
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+	.speaking-dot {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #7c3aed;
+		animation: pulse 1.2s ease-in-out infinite;
+	}
+	@keyframes pulse {
+		0%, 100% {
+			opacity: 0.4;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.3);
+		}
 	}
 	.content {
 		white-space: pre-wrap;
@@ -396,6 +651,47 @@
 		margin: 0 auto;
 		align-items: end;
 	}
+	.mic {
+		flex-shrink: 0;
+		width: 2.7rem;
+		height: 2.7rem;
+		padding: 0;
+		background: rgba(124, 58, 237, 0.15);
+		color: #fff;
+		border: 1px solid rgba(124, 58, 237, 0.3);
+		border-radius: 10px;
+		font-size: 1.1rem;
+		cursor: pointer;
+		display: grid;
+		place-items: center;
+		transition: all 0.15s;
+	}
+	.mic:hover:not(:disabled) {
+		background: rgba(124, 58, 237, 0.3);
+	}
+	.mic.listening {
+		background: #ef4444;
+		border-color: #ef4444;
+		animation: pulse-ring 1.4s ease-in-out infinite;
+	}
+	.mic:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+	}
+	@keyframes pulse-ring {
+		0%, 100% {
+			box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+		}
+		50% {
+			box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+		}
+	}
+	.input-wrap {
+		flex: 1;
+		position: relative;
+		display: flex;
+		flex-direction: column;
+	}
 	textarea {
 		flex: 1;
 		min-height: 2.5rem;
@@ -416,7 +712,16 @@
 	textarea:disabled {
 		opacity: 0.5;
 	}
-	.composer button {
+	.interim {
+		position: absolute;
+		bottom: -1.4rem;
+		left: 0.5rem;
+		font-size: 0.8rem;
+		color: #7c3aed;
+		font-style: italic;
+		pointer-events: none;
+	}
+	.composer > button[type='submit'] {
 		padding: 0.75rem 1.25rem;
 		background: #7c3aed;
 		color: white;
@@ -426,10 +731,10 @@
 		cursor: pointer;
 		height: 2.7rem;
 	}
-	.composer button:hover:not(:disabled) {
+	.composer > button[type='submit']:hover:not(:disabled) {
 		background: #6d28d9;
 	}
-	.composer button:disabled {
+	.composer > button[type='submit']:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
