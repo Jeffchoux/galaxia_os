@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-22** (session galaxia@OpenJeff — veille en production, compose env_file câblé).
+> Dernière révision : **2026-05-23** (cockpit V1 livré sur `app.galaxia-os.com` — SvelteKit + Claude streaming).
 
 ## Bootstrap éclair pour un nouvel agent
 
@@ -30,10 +30,13 @@ Tout le reste découle de là.
 | Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
 | fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
 | n8n (legacy)            | stopped     | Arrêté le 2026-05-22 (Jeff ne se souvenait pas de l'usage), volume `n8n_n8n_data` conservé |
+| Cockpit Galaxia V1      | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db` |
+| Cockpit dashboard NemoClaw | active   | `galaxia-nemoclaw-dashboard.service` restaure le tunnel SSH `127.0.0.1:18789` au boot (Caddy `nemoclaw.galaxia-os.com`) |
 
 ## Endpoints publics actifs
 
-- `https://app.galaxia-os.com/` — page placeholder (file_server)
+- `https://app.galaxia-os.com/` — **Cockpit Galaxia V1** (SvelteKit), login mot de passe, chat Claude streaming, persistance SQLite
+- `https://nemoclaw.galaxia-os.com/` — dashboard NemoClaw (reverse_proxy souverain, token dans le fragment URL)
 - `https://galaxia-os.com/` → 301 vers `https://app.galaxia-os.com/`
 
 ## Co-locataires sur OpenJeff (hors repo Galaxia)
@@ -54,7 +57,8 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | Sous-domaine  | Propagé ?  | Caddy vhost   |
 |---------------|------------|---------------|
 | @ (apex)      | ✅         | ✅ redirect    |
-| `app.`        | ✅         | ✅ file_server |
+| `app.`        | ✅         | ✅ reverse_proxy → cockpit (3001) |
+| `nemoclaw.`   | ✅         | ✅ reverse_proxy → dashboard NemoClaw (18789) |
 | `updates.`    | ❌         | placeholder commenté |
 | `install.`    | ❌         | placeholder commenté |
 | `docs.`       | ❌         | placeholder commenté |
@@ -89,7 +93,61 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
 | 3   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
 | ✅  | E2E install.sh dans container Ubuntu fresh              | Résolu 2026-05-22 — `ops/e2e/Dockerfile` + `run-test.sh`, 22/22 assertions, job CI `install-e2e` |
-| 5   | Quand 1er module appelant Claude API arrive : skill `/claude-api` | Pas de code Anthropic SDK dans le repo au 2026-05-22 — rappel pour quand un module premium ou un agent PME consommera Claude (prompt caching obligatoire dès le J1) |
+| ✅  | Quand 1er module appelant Claude API arrive : skill `/claude-api` | Résolu 2026-05-23 — cockpit V1 (`apps/cockpit/`) consomme `@anthropic-ai/sdk` en streaming SSE |
+| ✅  | Cockpit V1 (texte) sur `app.galaxia-os.com`             | Résolu 2026-05-23 — SvelteKit + adapter-node, auth password+session HMAC, chat Claude streaming, persistance SQLite, Dockerfile pour les filles |
+| 1   | Memory tool + MCP côté cockpit (étape 2 de PRODUCT-VISION) | Pas encore commencé — préalable à la voix selon la stratégie d'ordre |
+| 2   | Voix in/out + wake word (étape 4 de PRODUCT-VISION)     | Bloque sur Memory/MCP livrés                                       |
+
+## Cockpit V1 — détail d'exploitation (2026-05-23)
+
+**Premier livrable utilisable**. Pose la première brique du produit décrit dans [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §3 : le cockpit web texte. La voix, le wake word et le cowork s'ajouteront par-dessus.
+
+### Stack
+
+- **SvelteKit 2 + Svelte 5** (runes `$state` / `$props`), `@sveltejs/adapter-node` → binaire Node standalone derrière Caddy.
+- **`@anthropic-ai/sdk`** en streaming SSE (modèle par défaut `claude-opus-4-7`, surchargeable via `COCKPIT_MODEL`). Le coder agent reste sur `claude-agent-sdk` car il a besoin de tools ; le cockpit chat-only utilise le SDK basique, plus léger.
+- **`better-sqlite3`** pour la persistance des conversations (`data/cockpit.db`, mode WAL).
+- **`@node-rs/argon2`** pour le hash du mot de passe, **HMAC SHA-256** maison pour signer le cookie de session (pas de JWT lib).
+
+### Composants
+
+| Bloc                          | Chemin                                                          |
+|-------------------------------|-----------------------------------------------------------------|
+| Code                          | `apps/cockpit/`                                                 |
+| Service systemd               | `/etc/systemd/system/galaxia-cockpit.service` (source : `ops/galaxia-cockpit.service`) |
+| Caddy vhost                   | `app.galaxia-os.com` (reverse_proxy 127.0.0.1:3001)             |
+| Image Docker (filles PME)     | `galaxia/cockpit:latest` — service `cockpit` dans `docker-compose.yml` (profile `cockpit`) |
+| Secrets                       | `apps/cockpit/.env` (chmod 600, owner galaxia, **gitignored**)  |
+| DB                            | `apps/cockpit/data/cockpit.db` (créée au premier démarrage)     |
+
+### Accès
+
+URL : <https://app.galaxia-os.com>
+Mot de passe par défaut (2026-05-23) : **`alpha-nova-galaxia-signal-55`** — à changer par Jeff via le hash dans `.env` :
+
+```bash
+sudo -u galaxia bash -lc 'cd /home/galaxia/galaxia-project/apps/cockpit && node -e "
+import(\"@node-rs/argon2\").then(a=>a.hash(process.argv[1],{memoryCost:19456,timeCost:2}).then(console.log))
+" -- "MonNouveauPasse"'
+# Coller la sortie dans JEFF_PASS_HASH= du fichier .env, puis :
+sudo systemctl restart galaxia-cockpit.service
+```
+
+### Commandes utiles
+
+```bash
+sudo systemctl status galaxia-cockpit.service       # état
+sudo journalctl -u galaxia-cockpit.service -f       # logs live
+sudo systemctl restart galaxia-cockpit.service      # restart (kick deploy après edit .env)
+sudo -u galaxia bash -lc 'cd ~/galaxia-project/apps/cockpit && npm run build'  # rebuild après edit du code
+```
+
+### Limites volontaires du V1 (à reprendre selon PRODUCT-VISION)
+
+- Pas de Memory tool (chaque conversation est indépendante côté Claude — seul l'historique de la même conversation est rejoué)
+- Pas de voix / wake word
+- Pas d'upload de documents ni de cowork (édition multi-fichiers, screenshare)
+- Pas de multi-user (Jeff seul) — quand on ouvre aux PME, on bascule l'auth sur magic link/OAuth
 
 ## NemoClaw — état d'install détaillé (2026-05-22)
 
