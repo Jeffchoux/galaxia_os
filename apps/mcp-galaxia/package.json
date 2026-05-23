@@ -1,0 +1,22 @@
+{
+  "name": "galaxia-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing Galaxia data (conversations, briefs, memory) to MCP clients like Claude Desktop",
+  "main": "index.mjs",
+  "bin": {
+    "galaxia-mcp": "index.mjs"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "test:list-tools": "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' | node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^11.7.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
