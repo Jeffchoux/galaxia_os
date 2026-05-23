@@ -1,17 +1,17 @@
-# Galaxia — configuration Caddy de la galaxie mère
-# Source de vérité : ce fichier. Le fichier déployé est /etc/caddy/Caddyfile
-# (synchronisé manuellement pour l'instant — à automatiser via docker-compose
-# ou systemd path unit plus tard).
-
 {
 	email jeffchoux@hotmail.com
 }
 
-# Application principale — placeholder en attendant l'interface Galaxia
+# Application principale — cockpit SvelteKit (apps/cockpit).
+# Service systemd `galaxia-cockpit.service` écoute sur 127.0.0.1:3001.
+# Caddy fait le TLS + envoie X-Forwarded-* (utilisé par adapter-node pour
+# reconstruire l'Origin attendu par le CSRF check de SvelteKit).
 app.galaxia-os.com {
-	root * /var/www/galaxia
-	file_server
 	encode gzip zstd
+	reverse_proxy 127.0.0.1:3001 {
+		# SSE: pas de buffering pour le streaming Claude live.
+		flush_interval -1
+	}
 }
 
 # Redirection du domaine apex vers l'app
@@ -20,20 +20,33 @@ galaxia-os.com {
 }
 
 # Vhosts à activer une fois les DNS propagés vers 188.34.188.200 :
-#
-# updates.galaxia-os.com {
-# 	# Endpoint des mises à jour pour les galaxies filles
-# 	reverse_proxy localhost:8081
-# }
-#
-# install.galaxia-os.com {
-# 	# Script d'installation public (curl | bash style)
-# 	root * /var/www/install
-# 	file_server
-# }
-#
-# docs.galaxia-os.com {
-# 	# Documentation produit
-# 	root * /var/www/docs
-# 	file_server
-# }
+# - updates.galaxia-os.com
+# - install.galaxia-os.com
+# - docs.galaxia-os.com
+
+# Dashboard NemoClaw — reverse proxy souverain (remplace cloudflared tunnel).
+# Dépendance : `nemoclaw galaxia-main recover` doit avoir posé le port-forward
+# SSH local 127.0.0.1:18789 (sinon Caddy renvoie 502).
+# Auth : token NemoClaw dans le fragment URL (#token=...) géré par le dashboard JS.
+# Récupérer l'URL avec token via : sudo -u galaxia nemoclaw galaxia-main dashboard-url -q
+nemoclaw.galaxia-os.com {
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:18789 {
+		# WebSocket-friendly : pas de buffering si le dashboard en utilise.
+		flush_interval -1
+	}
+}
+
+# === Projet BabyRun — Lina (agent vocal Twilio<->OpenAI Realtime) ===
+# Service Node sur 127.0.0.1:3000, WebSocket upgrade pour /twilio/stream.
+# Auto-TLS Let's Encrypt via Caddy. Le fichier deploy/nginx.conf sous
+# /opt/lina est livré comme alternative documentée si on doit migrer.
+lina.babyrun.re {
+	encode gzip zstd
+	@stream path /twilio/stream
+	reverse_proxy @stream 127.0.0.1:3000 {
+		# Pas de buffering pour les WS — laisser passer en streaming.
+		flush_interval -1
+	}
+	reverse_proxy 127.0.0.1:3000
+}

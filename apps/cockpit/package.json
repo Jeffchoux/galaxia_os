@@ -1,0 +1,32 @@
+{
+  "name": "galaxia-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 3001 --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "node build",
+    "start": "node build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.0",
+    "@node-rs/argon2": "^2.0.2",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^5.2.11",
+    "@sveltejs/kit": "^2.15.0",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "svelte": "^5.16.0",
+    "svelte-check": "^4.1.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

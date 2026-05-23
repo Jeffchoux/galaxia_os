@@ -35,9 +35,32 @@ services:
 
   # Ollama tourne déjà en service système (apt) — pas containerisé
   # pour la galaxie mère ; sera containerisé pour les galaxies filles.
+
+  # Cockpit : interface web app.<pme-domain>. Sur OpenJeff (galaxie mère),
+  # le service tourne en systemd direct (cf. ops/galaxia-cockpit.service)
+  # pour éviter un docker run pendant l'itération. L'image est packagée
+  # ici pour les galaxies filles PME.
+  cockpit:
+    <<: *galaxia-env
+    build:
+      context: ./apps/cockpit
+      dockerfile: Dockerfile
+    image: galaxia/cockpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      ORIGIN: ${COCKPIT_ORIGIN:-https://app.galaxia-os.com}
+    volumes:
+      - cockpit_data:/app/data
+    profiles: ["cockpit"]
+
   noop:
     <<: *galaxia-env
     image: alpine:3
     command: ["sh", "-c", "echo Galaxia compose stack placeholder; sleep infinity"]
     restart: "no"
     profiles: ["never"]
+
+volumes:
+  cockpit_data:

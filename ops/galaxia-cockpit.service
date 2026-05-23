@@ -1,0 +1,29 @@
+[Unit]
+Description=Galaxia — cockpit web (SvelteKit prod) servi en local sur :3000
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/apps/cockpit
+EnvironmentFile=/home/galaxia/galaxia-project/apps/cockpit/.env
+# Origin attendu par le CSRF check de SvelteKit derrière le reverse proxy Caddy.
+Environment="HOST=127.0.0.1"
+Environment="PORT=3001"
+Environment="ORIGIN=https://app.galaxia-os.com"
+Environment="NODE_ENV=production"
+ExecStart=/usr/bin/node /home/galaxia/galaxia-project/apps/cockpit/build
+Restart=on-failure
+RestartSec=5
+# Sandboxing modéré : on doit garder le write sur ./data
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
