@@ -29,6 +29,16 @@
 	let recognition: any = null; // SpeechRecognition (browser-only)
 	let ttsBuffer = ''; // accumulé pendant le stream pour découper en phrases TTS
 
+	// VAD — détection d'interruption pendant que Galaxia parle
+	let audioCtx: AudioContext | null = null;
+	let analyser: AnalyserNode | null = null;
+	let mediaStream: MediaStream | null = null;
+	let monitorRaf: number | null = null;
+	let voiceDetectedFrames = 0;
+	let vadActive = $state(false);
+	const VAD_THRESHOLD = 0.04; // RMS — ajusté empiriquement avec echoCancellation actif
+	const VAD_TRIGGER_FRAMES = 4; // ~70ms à 60fps : debounce
+
 	onMount(() => {
 		if (typeof window === 'undefined') return;
 		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -63,9 +73,14 @@
 		r.onend = () => {
 			listening = false;
 			interim = '';
-			// En voiceMode, on envoie automatiquement quand l'écoute se termine
 			if (voiceMode && draft.trim()) {
+				// Hands-free : envoi auto au silence final
 				send();
+			} else if (voiceMode && !speaking && !sending) {
+				// Hands-free, rien entendu mais on reste à l'écoute : relance
+				setTimeout(() => {
+					if (voiceMode && !listening && !speaking && !sending) toggleListening();
+				}, 150);
 			}
 		};
 		r.onerror = (e: any) => {
@@ -109,10 +124,16 @@
 		u.pitch = 1.0;
 		u.onstart = () => (speaking = true);
 		u.onend = () => {
-			// reste en speaking=true tant que la queue n'est pas vide
-			if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
-				speaking = false;
-			}
+			// micro-délai pour laisser la queue se vider correctement entre 2 utterances
+			setTimeout(() => {
+				if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
+					speaking = false;
+					// Hands-free : Galaxia a fini de parler → on reprend l'écoute
+					if (voiceMode && !listening && !sending) {
+						toggleListening();
+					}
+				}
+			}, 60);
 		};
 		window.speechSynthesis.speak(u);
 	}
@@ -122,6 +143,75 @@
 		window.speechSynthesis.cancel();
 		speaking = false;
 		ttsBuffer = '';
+	}
+
+	// ─── VAD (interruption naturelle) ─────────────────────────────────────
+	async function startAudioMonitor() {
+		if (audioCtx || typeof window === 'undefined') return;
+		try {
+			mediaStream = await navigator.mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true
+				}
+			});
+			const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+			const ctx: AudioContext = new Ctx();
+			const source = ctx.createMediaStreamSource(mediaStream);
+			const a = ctx.createAnalyser();
+			a.fftSize = 1024;
+			source.connect(a);
+			audioCtx = ctx;
+			analyser = a;
+			vadActive = true;
+			monitorLoop();
+		} catch (e) {
+			errorMsg = "Micro non autorisé — VAD désactivé. " + (e instanceof Error ? e.message : '');
+			vadActive = false;
+		}
+	}
+
+	function stopAudioMonitor() {
+		if (monitorRaf !== null) {
+			cancelAnimationFrame(monitorRaf);
+			monitorRaf = null;
+		}
+		if (mediaStream) {
+			mediaStream.getTracks().forEach((t) => t.stop());
+			mediaStream = null;
+		}
+		if (audioCtx) {
+			audioCtx.close().catch(() => {});
+			audioCtx = null;
+		}
+		analyser = null;
+		voiceDetectedFrames = 0;
+		vadActive = false;
+	}
+
+	function monitorLoop() {
+		if (!analyser) return;
+		const buf = new Float32Array(analyser.fftSize);
+		analyser.getFloatTimeDomainData(buf);
+		let sum = 0;
+		for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+		const rms = Math.sqrt(sum / buf.length);
+
+		if (rms > VAD_THRESHOLD) {
+			voiceDetectedFrames++;
+			// Interruption : si Galaxia parle ET que Jeff dépasse le seuil
+			// suffisamment longtemps (debounce), on coupe + on bascule en écoute.
+			if (speaking && voiceDetectedFrames >= VAD_TRIGGER_FRAMES) {
+				voiceDetectedFrames = 0;
+				stopSpeaking();
+				if (!listening && !sending) toggleListening();
+			}
+		} else {
+			voiceDetectedFrames = 0;
+		}
+
+		monitorRaf = requestAnimationFrame(monitorLoop);
 	}
 
 	function flushTtsBuffer(force = false) {
@@ -195,6 +285,13 @@
 			sending = false;
 			streamingIndex = null;
 			await invalidateAll();
+			// Filet de sécurité : si voiceMode actif et qu'aucun TTS n'a pris la main
+			// (erreur réseau, response vide…), on relance l'écoute.
+			if (voiceMode && !listening && !speaking) {
+				setTimeout(() => {
+					if (voiceMode && !listening && !speaking && !sending) toggleListening();
+				}, 200);
+			}
 		}
 	}
 
@@ -251,7 +348,19 @@
 
 	function toggleVoiceMode() {
 		voiceMode = !voiceMode;
-		if (!voiceMode) stopSpeaking();
+		if (voiceMode) {
+			// Hands-free : on démarre l'analyser (VAD) + on lance l'écoute tout de suite
+			startAudioMonitor();
+			if (!listening && !sending) {
+				setTimeout(() => {
+					if (voiceMode && !listening && !sending) toggleListening();
+				}, 150);
+			}
+		} else {
+			stopSpeaking();
+			stopAudioMonitor();
+			if (listening) recognition?.stop();
+		}
 	}
 </script>
 
@@ -319,11 +428,15 @@
 					disabled={!voiceSupported.tts}
 					title={voiceSupported.tts
 						? voiceMode
-							? 'Voix activée — clic pour repasser en texte'
-							: 'Activer le mode voix (TTS auto sur les réponses)'
+							? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
+							: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
 						: 'TTS non supporté par ce navigateur'}
 				>
-					{voiceMode ? '🔊 Voix' : '🔇 Voix'}
+					{#if voiceMode}
+						{vadActive ? '🎙️ Mains libres' : '🔊 Voix'}
+					{:else}
+						🔇 Voix
+					{/if}
 				</button>
 			</div>
 		</header>
