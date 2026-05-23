@@ -58,6 +58,19 @@ function buildServerConfigs(): McpServerConfig[] {
 		});
 	}
 
+	// Brave Search — moteur de recherche web indépendant (pas de Google).
+	// Actif uniquement si BRAVE_API_KEY est posé. Gratuit jusqu'à 2000 queries/mois
+	// sur le plan Free de https://api.search.brave.com/app/keys
+	const braveKey = env.BRAVE_API_KEY;
+	if (braveKey) {
+		configs.push({
+			name: 'brave-search',
+			command: 'node',
+			args: [`${NODE_MODULES}/server-brave-search/dist/index.js`],
+			env: { BRAVE_API_KEY: braveKey }
+		});
+	}
+
 	return configs;
 }
 
