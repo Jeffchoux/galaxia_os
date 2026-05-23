@@ -1,0 +1,15 @@
+# Galaxia — Caddyfile pour les galaxies filles PME (containerisé).
+# Le COCKPIT_DOMAIN et ACME_EMAIL sont injectés par docker-compose
+# depuis /opt/galaxia/config/.env.
+
+{
+    email {$ACME_EMAIL}
+}
+
+{$COCKPIT_DOMAIN} {
+    encode gzip zstd
+    reverse_proxy cockpit:3000 {
+        # SSE / streaming Claude : pas de buffering.
+        flush_interval -1
+    }
+}

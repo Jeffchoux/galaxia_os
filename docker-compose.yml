@@ -1,15 +1,20 @@
-# Galaxia — orchestration de la galaxie mère
+# Galaxia — orchestration galaxie fille PME
 #
-# Ce fichier est volontairement minimal pour l'instant. Les services
-# OpenClaw, NemoClaw et l'intégration Ollama seront ajoutés au fur et
-# à mesure que chaque brique est intégrée. Caddy est exécuté en service
-# système (apt) sur la galaxie mère, mais sera containerisé pour les
-# galaxies filles afin de garantir la reproductibilité.
+# Sur OpenJeff (galaxie mère), les services tournent en systemd direct
+# (cf. ops/*.service) pour itérer vite. Pour une galaxie fille PME,
+# ce docker-compose.yml démarre la stack complète :
 #
-# Configuration & secrets : produits par `scripts/wizard.sh` dans
-# /opt/galaxia/config/{galaxia.conf,.env}. L'ancre YAML ci-dessous
-# est mergée dans chaque service via `<<: *galaxia-env`. `required: false`
-# évite que `docker compose` plante quand le wizard n'a pas encore tourné.
+#   docker compose --profile pme up -d
+#
+# Pré-requis avant `up` :
+#   - /opt/galaxia/config/.env produit par scripts/wizard.sh
+#     (contient ANTHROPIC_API_KEY, JEFF_PASS_HASH, SESSION_SECRET,
+#      BOT_TOKEN, ALLOWED_CHAT_ID, COCKPIT_DOMAIN, ACME_EMAIL, etc.)
+#   - DNS A record sur COCKPIT_DOMAIN pointant vers l'IP du serveur PME
+#
+# Profils :
+#   - `cockpit` : juste le cockpit (utile pour dev local)
+#   - `pme`     : stack complète (cockpit + bot Telegram + Caddy + Ollama)
 
 x-galaxia-env: &galaxia-env
   env_file:
@@ -19,27 +24,6 @@ x-galaxia-env: &galaxia-env
       required: false
 
 services:
-  # placeholder — sera renseigné lors de l'intégration d'OpenClaw
-  # openclaw:
-  #   <<: *galaxia-env
-  #   image: openclaw/openclaw:latest
-  #   restart: unless-stopped
-  #   depends_on: [ollama]
-
-  # placeholder — NemoClaw (couche sécurité NVIDIA enterprise)
-  # nemoclaw:
-  #   <<: *galaxia-env
-  #   image: nemoclaw/nemoclaw:latest
-  #   restart: unless-stopped
-  #   depends_on: [openclaw]
-
-  # Ollama tourne déjà en service système (apt) — pas containerisé
-  # pour la galaxie mère ; sera containerisé pour les galaxies filles.
-
-  # Cockpit : interface web app.<pme-domain>. Sur OpenJeff (galaxie mère),
-  # le service tourne en systemd direct (cf. ops/galaxia-cockpit.service)
-  # pour éviter un docker run pendant l'itération. L'image est packagée
-  # ici pour les galaxies filles PME.
   cockpit:
     <<: *galaxia-env
     build:
@@ -47,13 +31,54 @@ services:
       dockerfile: Dockerfile
     image: galaxia/cockpit:latest
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3000"
+    expose:
+      - "3000"
     environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
       ORIGIN: ${COCKPIT_ORIGIN:-https://app.galaxia-os.com}
+      COCKPIT_DB_PATH: /app/data/cockpit.db
+      # Désactive le filesystem MCP côté fille (chemins host-spécifiques),
+      # à ré-activer par la PME via override si elle veut.
+      COCKPIT_MCP_FS_ROOTS: "-"
     volumes:
       - cockpit_data:/app/data
-    profiles: ["cockpit"]
+    profiles: ["cockpit", "pme"]
+
+  bot:
+    <<: *galaxia-env
+    build:
+      context: ./agents/telegram
+      dockerfile: Dockerfile
+    image: galaxia/bot:latest
+    restart: unless-stopped
+    environment:
+      COCKPIT_DB_PATH: /cockpit_data/cockpit.db
+      INBOX_PATH: /bot_data/inbox.md
+    volumes:
+      - cockpit_data:/cockpit_data
+      - bot_data:/bot_data
+    depends_on:
+      - cockpit
+    profiles: ["pme"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile.compose:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      COCKPIT_DOMAIN: ${COCKPIT_DOMAIN:-app.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    depends_on:
+      - cockpit
+    profiles: ["pme"]
 
   noop:
     <<: *galaxia-env
@@ -64,3 +89,6 @@ services:
 
 volumes:
   cockpit_data:
+  bot_data:
+  caddy_data:
+  caddy_config:
