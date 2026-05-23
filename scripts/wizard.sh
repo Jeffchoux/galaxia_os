@@ -11,6 +11,7 @@
 # Mode non-interactif (déploiements automatisés) :
 #   GALAXIA_NON_INTERACTIVE=1 GALAXIA_PRIVACY_MODE=hybrid \
 #   GALAXIA_LLM_PROVIDER=claude GALAXIA_LLM_API_KEY=sk-... \
+#   GALAXIA_COCKPIT_PASSWORD='changeme!' GALAXIA_ACME_EMAIL=admin@pme.fr \
 #   bash scripts/wizard.sh
 #
 # Mode test (pas besoin de root) :
@@ -39,6 +40,46 @@ section() {
 }
 
 is_root() { [ "$(id -u)" -eq 0 ]; }
+
+# ---------- Crypto helpers ----------
+
+# Génère un secret aléatoire base64 (48 octets ≈ 64 chars). Fallback /dev/urandom
+# si openssl absent. Utilisé pour SESSION_SECRET (HMAC cookies cockpit).
+generate_session_secret() {
+	if command -v openssl >/dev/null 2>&1; then
+		openssl rand -base64 48 | tr -d '\n'
+	else
+		head -c 48 /dev/urandom | base64 | tr -d '\n'
+	fi
+}
+
+# Garantit la présence du binaire `argon2` (paquet apt `argon2`).
+# Si absent, tente l'install en mode root ; sinon, échoue avec message clair.
+ensure_argon2() {
+	if command -v argon2 >/dev/null 2>&1; then
+		return 0
+	fi
+	if is_root && command -v apt-get >/dev/null 2>&1; then
+		log "Installation du paquet argon2 (calcul du hash du mot de passe cockpit)..."
+		# `apt-get update` peut avoir déjà tourné dans install.sh — on retente discrètement.
+		apt-get update >/dev/null 2>&1 || true
+		if apt-get install -y argon2 >/dev/null 2>&1; then
+			return 0
+		fi
+	fi
+	die "Le binaire 'argon2' est introuvable. Installez-le : sudo apt-get install -y argon2"
+}
+
+# Hash argon2id d'un mot de passe au format PHC standard, lisible par
+# @node-rs/argon2 côté cockpit. Paramètres : -t 3 -m 15 -p 1 (32 MiB / 3 passes).
+hash_password() {
+	local password="$1" salt
+	ensure_argon2
+	# Salt 16 chars ASCII safe — argon2 CLI exige un salt en argument direct.
+	salt="$(head -c 32 /dev/urandom | base64 | tr -d '+/=\n' | head -c 16)"
+	# `-e` = output PHC encoded, `-id` = argon2id (cohérent avec @node-rs/argon2).
+	printf '%s' "$password" | argon2 "$salt" -id -t 3 -m 15 -p 1 -e
+}
 
 # ask "Question" "default" — echoes the answer
 ask() {
@@ -122,8 +163,8 @@ welcome() {
 ║                                                              ║
 ║              Bienvenue dans l'installation Galaxia           ║
 ║                                                              ║
-║   On va vous poser 4 questions simples pour configurer       ║
-║   votre Galaxia. Comptez 2 minutes.                          ║
+║   On va vous poser 5 questions simples pour configurer       ║
+║   votre Galaxia. Comptez 3 minutes.                          ║
 ║                                                              ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -160,7 +201,7 @@ SUMMARY
 }
 
 ask_privacy_mode() {
-	section "1/4 — Confidentialité des données"
+	section "1/5 — Confidentialité des données"
 
 	cat >&2 <<'EXPLAIN'
 Galaxia peut traiter vos données de 3 façons. Plus c'est local, plus
@@ -178,7 +219,7 @@ EXPLAIN
 ask_llm_provider() {
 	local privacy="$1" provider
 
-	section "2/4 — Choix du fournisseur LLM"
+	section "2/5 — Choix du fournisseur LLM"
 
 	if [ "$privacy" = "local" ]; then
 		log "Mode 100% local → Ollama (déjà installé) est imposé." >&2
@@ -203,7 +244,7 @@ ask_api_key() {
 
 	[ "$provider" = "ollama" ] && { echo ""; return; }
 
-	section "3/4 — Clé API ${provider}"
+	section "3/5 — Clé API ${provider}"
 
 	case "$provider" in
 		claude)
@@ -240,15 +281,16 @@ EXPLAIN
 }
 
 ask_domain() {
-	section "4/4 — Nom de domaine (optionnel)"
+	section "4/5 — Nom de domaine (optionnel)"
 
 	cat >&2 <<'EXPLAIN'
 Si vous avez un nom de domaine (ex: galaxia.ma-pme.fr) pointé vers cette
 machine, Galaxia configurera HTTPS automatiquement (Caddy + Let's Encrypt)
-et exposera le dashboard à cette adresse.
+et exposera le cockpit à cette adresse.
 
 Si vous n'en avez pas, c'est OK : Galaxia créera un tunnel sécurisé via
-Cloudflare et vous donnera une URL temporaire (zéro config DNS).
+Cloudflare et vous donnera une URL temporaire (zéro config DNS). Vous
+pourrez brancher un vrai domaine plus tard en relançant le wizard.
 
 EXPLAIN
 	local domain
@@ -256,8 +298,100 @@ EXPLAIN
 	echo "$domain"
 }
 
+ask_acme_email() {
+	local domain="$1" email
+	[ -n "$domain" ] || { echo ""; return; }
+
+	cat >&2 <<'EXPLAIN'
+
+Let's Encrypt a besoin d'une adresse e-mail pour vous prévenir si un
+renouvellement de certificat échoue. Pas de spam, juste les alertes.
+
+EXPLAIN
+	if [ -n "${GALAXIA_ACME_EMAIL:-}" ]; then
+		echo "$GALAXIA_ACME_EMAIL"; return
+	fi
+	email="$(ask "Adresse e-mail pour les alertes certificat HTTPS" "")"
+	[ -n "$email" ] || die "Une adresse e-mail est obligatoire pour activer HTTPS sur $domain."
+	echo "$email"
+}
+
+ask_cockpit_password() {
+	section "5/5 — Mot de passe du cockpit"
+
+	cat >&2 <<'EXPLAIN'
+Ce mot de passe protège l'accès à votre cockpit Galaxia (l'interface web).
+Vous l'utiliserez pour vous connecter sur app.<votre-domaine>. Pour démarrer,
+choisissez quelque chose de fort mais facile à retenir — vous pouvez le
+changer plus tard en relançant le wizard.
+
+  • Au moins 12 caractères, idéalement une phrase mémorable
+  • Ne pas réutiliser un mot de passe déjà utilisé ailleurs
+
+EXPLAIN
+	if [ -n "${GALAXIA_COCKPIT_PASSWORD:-}" ]; then
+		printf '%s' "$GALAXIA_COCKPIT_PASSWORD" | hash_password "$GALAXIA_COCKPIT_PASSWORD" >/dev/null 2>&1 \
+			|| true # noop, juste pour valider ensure_argon2 tôt
+		hash_password "$GALAXIA_COCKPIT_PASSWORD"
+		return
+	fi
+	if [ "$GALAXIA_NON_INTERACTIVE" = "1" ]; then
+		die "Mode non-interactif : fournir GALAXIA_COCKPIT_PASSWORD"
+	fi
+	# Pré-installe argon2 si on est root — évite de couper la conversation
+	# après que l'utilisateur ait tapé son mot de passe.
+	if is_root; then ensure_argon2; fi
+	local p1 p2
+	while :; do
+		p1="$(ask_secret "Mot de passe cockpit")"
+		[ -n "$p1" ] || { echo "  Mot de passe vide — recommencez." >&2; continue; }
+		if [ "${#p1}" -lt 8 ]; then
+			echo "  Trop court (< 8 caractères) — recommencez." >&2
+			continue
+		fi
+		p2="$(ask_secret "Confirmation (retapez le même)")"
+		if [ "$p1" = "$p2" ]; then
+			break
+		fi
+		echo "  Les deux saisies diffèrent — recommencez." >&2
+	done
+	hash_password "$p1"
+}
+
+ask_mcp_keys() {
+	# Retourne deux lignes : "BRAVE_API_KEY=..." et "GITHUB_PERSONAL_ACCESS_TOKEN=..."
+	# (vides si l'utilisateur saute). Section optionnelle, ne bloque jamais l'install.
+	section "Bonus — Recherche web et GitHub (optionnel)"
+
+	cat >&2 <<'EXPLAIN'
+Galaxia peut être branché à deux services externes pour étendre ses
+capacités. Les deux sont optionnels — vous pouvez les ajouter plus tard.
+
+  • Brave Search : permet à Galaxia de chercher sur le web (2 000
+    requêtes gratuites par mois). Clé sur https://api.search.brave.com/app/keys
+  • GitHub PAT : permet à Galaxia de lire/ouvrir des issues et PRs sur
+    vos dépôts. Token sur https://github.com/settings/tokens (scope `repo`).
+
+EXPLAIN
+	local brave="" gh=""
+	if [ "$GALAXIA_NON_INTERACTIVE" = "1" ]; then
+		brave="${GALAXIA_BRAVE_KEY:-}"
+		gh="${GALAXIA_GITHUB_PAT:-}"
+	else
+		if confirm "Configurer Brave Search maintenant ?" "n"; then
+			brave="$(ask_secret "Clé Brave (BSA...)")"
+		fi
+		if confirm "Configurer un GitHub PAT maintenant ?" "n"; then
+			gh="$(ask_secret "GitHub PAT (ghp_...)")"
+		fi
+	fi
+	printf 'BRAVE_API_KEY=%s\n' "$brave"
+	printf 'GITHUB_PERSONAL_ACCESS_TOKEN=%s\n' "$gh"
+}
+
 ask_wake_word() {
 	section "Bonus — Mot-clé d'éveil"
+	# (Optionnel — uniquement utilisé par la voix dans le cockpit.)
 
 	cat >&2 <<'EXPLAIN'
 Comme "Hey Siri" ou "Alexa", votre Galaxia répond à un mot-clé.
@@ -281,6 +415,9 @@ compute_dashboard_mode() {
 
 write_config() {
 	local privacy="$1" provider="$2" api_key="$3" domain="$4" dashboard_mode="$5" wake_word="$6"
+	local pass_hash="$7" session_secret="$8" acme_email="$9" mcp_brave="${10}" mcp_github="${11}"
+	local cockpit_origin=""
+	[ -n "$domain" ] && cockpit_origin="https://${domain}"
 
 	mkdir -p "$GALAXIA_CONFIG_DIR"
 
@@ -299,18 +436,37 @@ GALAXIA_CONFIGURED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 GALAXIA_CONFIGURED_BY=wizard
 CONF
 
-	# .env : un seul provider rempli selon le choix
+	# .env : secrets cockpit + clé LLM + variables docker-compose (COCKPIT_DOMAIN,
+	# COCKPIT_ORIGIN, ACME_EMAIL — substituées par compose au moment du `up`).
 	{
 		echo "# Galaxia — secrets locaux"
 		echo "# Généré par scripts/wizard.sh le $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 		echo "# Ne JAMAIS commit ce fichier. Ne JAMAIS le partager."
 		echo
+		echo "# --- LLM provider ---"
 		case "$provider" in
 			claude)  echo "ANTHROPIC_API_KEY=${api_key}" ;;
 			openai)  echo "OPENAI_API_KEY=${api_key}" ;;
 			gemini)  echo "GOOGLE_API_KEY=${api_key}" ;;
 			ollama)  echo "# Mode local — pas de clé API requise." ;;
 		esac
+		echo
+		echo "# --- Cockpit ---"
+		# Le hash argon2id contient des '\$' qu'il ne faut PAS échapper côté .env
+		# (consommé par docker-compose en mode env_file, qui lit la valeur brute).
+		echo "JEFF_PASS_HASH=${pass_hash}"
+		echo "SESSION_SECRET=${session_secret}"
+		if [ -n "$domain" ]; then
+			echo "COCKPIT_DOMAIN=${domain}"
+			echo "COCKPIT_ORIGIN=${cockpit_origin}"
+			echo "ACME_EMAIL=${acme_email}"
+		else
+			echo "# Mode tunnel — pas de COCKPIT_DOMAIN/ORIGIN/ACME_EMAIL (assignés au runtime)"
+		fi
+		echo
+		echo "# --- MCP servers (optionnels — vides = serveur non démarré) ---"
+		echo "${mcp_brave}"
+		echo "${mcp_github}"
 	} > "$ENV_FILE"
 
 	chmod 600 "$ENV_FILE"
@@ -370,23 +526,37 @@ main() {
 	check_existing_config
 
 	local privacy provider api_key domain dashboard_mode wake_word
+	local pass_hash session_secret acme_email mcp_brave mcp_github
 
 	# Mode non-interactif : tout doit venir des env vars
 	privacy="${GALAXIA_PRIVACY_MODE:-$(ask_privacy_mode)}"
 	provider="${GALAXIA_LLM_PROVIDER:-$(ask_llm_provider "$privacy")}"
 	api_key="$(ask_api_key "$provider")"
 	domain="${GALAXIA_DOMAIN-$(ask_domain)}"
+	acme_email="$(ask_acme_email "$domain")"
+	pass_hash="$(ask_cockpit_password)"
+	session_secret="$(generate_session_secret)"
 	wake_word="${GALAXIA_WAKE_WORD:-$(ask_wake_word)}"
+	# ask_mcp_keys retourne 2 lignes BRAVE_API_KEY=... / GITHUB_PERSONAL_ACCESS_TOKEN=...
+	local mcp_block
+	mcp_block="$(ask_mcp_keys)"
+	mcp_brave="$(echo "$mcp_block" | grep '^BRAVE_API_KEY=' | head -1)"
+	mcp_github="$(echo "$mcp_block" | grep '^GITHUB_PERSONAL_ACCESS_TOKEN=' | head -1)"
 	dashboard_mode="$(compute_dashboard_mode "$domain")"
 
-	# Récap avant écriture
+	# Récap avant écriture — on ne montre PAS le hash ni le secret session
 	section "Récapitulatif"
 	cat <<RECAP
   Confidentialité  : $privacy
   LLM              : $provider $([ "$provider" != "ollama" ] && echo "(clé fournie : oui)" || echo "")
   Domaine          : ${domain:-aucun}
+  ACME e-mail      : ${acme_email:-—}
   Dashboard        : $dashboard_mode
   Mot-clé          : $wake_word
+  Mot de passe     : enregistré (hash argon2id)
+  Session secret   : généré (48 octets aléatoires)
+  Brave Search     : $([ -n "${mcp_brave#BRAVE_API_KEY=}" ] && echo "configuré" || echo "—")
+  GitHub PAT       : $([ -n "${mcp_github#GITHUB_PERSONAL_ACCESS_TOKEN=}" ] && echo "configuré" || echo "—")
 
 RECAP
 	if ! confirm "Valider et enregistrer ?" "y"; then
@@ -394,7 +564,8 @@ RECAP
 		exit 1
 	fi
 
-	write_config "$privacy" "$provider" "$api_key" "$domain" "$dashboard_mode" "$wake_word"
+	write_config "$privacy" "$provider" "$api_key" "$domain" "$dashboard_mode" "$wake_word" \
+		"$pass_hash" "$session_secret" "$acme_email" "$mcp_brave" "$mcp_github"
 	print_final_summary "$privacy" "$provider" "$domain" "$dashboard_mode" "$wake_word"
 }
 
