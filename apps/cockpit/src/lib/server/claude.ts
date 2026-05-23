@@ -3,6 +3,7 @@ import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resource
 import { getAnthropicKey, getModel } from './env';
 import { loadMemory } from './memory';
 import type { Conversation, Document, Message as DbMessage } from './db';
+import { GALAXIA_TOOLS, executeTool } from './tools';
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -14,7 +15,13 @@ const BASE_SYSTEM = `Tu es Galaxia, l'IA du cockpit de Jeff (créateur du projet
 
 Galaxia est un écosystème IA souverain, open-source et gratuit pour PME : chaque PME l'installe sur son propre serveur avec ses propres clés API. Tu es le cockpit de la galaxie mère (OpenJeff). Tu parles en français par défaut.
 
-Style : direct, sans flagornerie, sans phrases d'introduction inutiles. Réponses courtes par défaut, longues seulement quand le sujet l'exige. Markdown standard supporté. Pas d'emoji sauf si Jeff en demande.`;
+Style : direct, sans flagornerie, sans phrases d'introduction inutiles. Réponses courtes par défaut, longues seulement quand le sujet l'exige. Markdown standard supporté. Pas d'emoji sauf si Jeff en demande.
+
+Tu disposes de tools (function calling) :
+- update_memory : utilise-le PROACTIVEMENT dès que Jeff t'apprend quelque chose qu'il faudrait retenir entre sessions (préférence, projet, contact, décision). Ne lui demande pas la permission, écris simplement la note et continue. Reste sobre — note ce qui est durable, pas chaque détail conversationnel.
+- read_brief / list_briefs : pour récupérer un brief du pipeline digest si Jeff y fait référence ou si c'est utile au contexte.
+
+Tu n'as pas besoin d'annoncer chaque tool call ; agis et continue.`;
 
 export interface ChatTurn {
 	role: 'user' | 'assistant';
@@ -182,22 +189,102 @@ export async function summarizeHistory(
 	return { summary, until_idx: toIdx };
 }
 
+export type StreamEvent =
+	| { kind: 'delta'; text: string }
+	| { kind: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+	| { kind: 'tool_result'; id: string; name: string; result: string; is_error?: boolean };
+
+const MAX_TOOL_ROUNDS = 6;
+
 export async function* streamReply(
 	conversation: Conversation | null,
 	history: DbMessage[],
 	docs: Document[] = []
-): AsyncGenerator<string, void, unknown> {
-	const stream = client().messages.stream({
-		model: getModel(),
-		max_tokens: 4096,
-		system: buildSystemPrompt(conversation),
-		messages: buildMessageParams(conversation, history, docs)
-	});
+): AsyncGenerator<StreamEvent, void, unknown> {
+	const messages = buildMessageParams(conversation, history, docs);
+	const system = buildSystemPrompt(conversation);
 
-	for await (const event of stream) {
-		if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-			yield event.delta.text;
+	for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+		const stream = client().messages.stream({
+			model: getModel(),
+			max_tokens: 4096,
+			system,
+			messages,
+			// Cast : GALAXIA_TOOLS suit le schema MCP/Anthropic, mais nos types maison
+			// sont volontairement simplifiés (pas de cache_control etc.).
+			tools: GALAXIA_TOOLS as unknown as Anthropic.Tool[]
+		});
+
+		let currentText = '';
+		const collected: ContentBlockParam[] = [];
+		const pendingTool: { id?: string; name?: string; partial: string } = { partial: '' };
+
+		for await (const event of stream) {
+			if (event.type === 'content_block_start') {
+				const cb = event.content_block;
+				if (cb.type === 'text') {
+					currentText = '';
+				} else if (cb.type === 'tool_use') {
+					pendingTool.id = cb.id;
+					pendingTool.name = cb.name;
+					pendingTool.partial = '';
+				}
+			} else if (event.type === 'content_block_delta') {
+				if (event.delta.type === 'text_delta') {
+					yield { kind: 'delta', text: event.delta.text };
+					currentText += event.delta.text;
+				} else if (event.delta.type === 'input_json_delta') {
+					pendingTool.partial += event.delta.partial_json;
+				}
+			} else if (event.type === 'content_block_stop') {
+				if (pendingTool.id && pendingTool.name) {
+					let input: Record<string, unknown> = {};
+					try {
+						input = pendingTool.partial ? JSON.parse(pendingTool.partial) : {};
+					} catch {
+						input = {};
+					}
+					collected.push({
+						type: 'tool_use',
+						id: pendingTool.id,
+						name: pendingTool.name,
+						input
+					} as ContentBlockParam);
+					yield { kind: 'tool_use', id: pendingTool.id, name: pendingTool.name, input };
+					pendingTool.id = undefined;
+					pendingTool.name = undefined;
+					pendingTool.partial = '';
+				} else if (currentText) {
+					collected.push({ type: 'text', text: currentText });
+					currentText = '';
+				}
+			}
 		}
+
+		const finalMsg = await stream.finalMessage();
+		if (finalMsg.stop_reason !== 'tool_use') return;
+
+		// Execute tool calls et reboucle
+		messages.push({ role: 'assistant', content: collected });
+		const toolResults: ContentBlockParam[] = [];
+		for (const block of collected) {
+			if (block.type !== 'tool_use') continue;
+			const r = await executeTool(block.name, block.input as Record<string, unknown>);
+			yield {
+				kind: 'tool_result',
+				id: block.id,
+				name: block.name,
+				result: r.result,
+				is_error: r.is_error
+			};
+			toolResults.push({
+				type: 'tool_result',
+				tool_use_id: block.id,
+				content: r.result,
+				is_error: r.is_error
+			} as ContentBlockParam);
+		}
+		messages.push({ role: 'user', content: toolResults });
 	}
 }
 

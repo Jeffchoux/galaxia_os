@@ -8,7 +8,15 @@
 	}
 	let { data }: Props = $props();
 
-	type Turn = { role: 'user' | 'assistant'; content: string };
+	type ToolEvent = {
+		kind: 'tool_use' | 'tool_result';
+		id: string;
+		name: string;
+		input?: Record<string, unknown>;
+		result?: string;
+		is_error?: boolean;
+	};
+	type Turn = { role: 'user' | 'assistant'; content: string; tools?: ToolEvent[] };
 	type DocChip = { id: string; filename: string; mime_type: string; size: number };
 
 	let conversationId = $state<string | null>(data.active?.id ?? null);
@@ -358,7 +366,16 @@
 			else if (line.startsWith('data: ')) dataStr += line.slice(6);
 		}
 		if (!dataStr) return;
-		let data: { id?: string; text?: string; title?: string; message?: string };
+		let data: {
+			id?: string;
+			text?: string;
+			title?: string;
+			message?: string;
+			name?: string;
+			input?: Record<string, unknown>;
+			result?: string;
+			is_error?: boolean;
+		};
 		try {
 			data = JSON.parse(dataStr);
 		} catch {
@@ -369,12 +386,37 @@
 			conversationId = data.id;
 			history.replaceState({}, '', `/?c=${data.id}`);
 		} else if (event === 'delta' && data.text && streamingIndex !== null) {
+			const t = turns[streamingIndex];
 			turns[streamingIndex] = {
 				role: 'assistant',
-				content: turns[streamingIndex].content + data.text
+				content: t.content + data.text,
+				tools: t.tools
 			};
 			ttsBuffer += data.text;
 			flushTtsBuffer(false);
+			autoscroll();
+		} else if (event === 'tool_use' && data.id && data.name && streamingIndex !== null) {
+			const t = turns[streamingIndex];
+			const next: ToolEvent = {
+				kind: 'tool_use',
+				id: data.id,
+				name: data.name,
+				input: data.input
+			};
+			turns[streamingIndex] = {
+				role: 'assistant',
+				content: t.content,
+				tools: [...(t.tools ?? []), next]
+			};
+			autoscroll();
+		} else if (event === 'tool_result' && data.id && streamingIndex !== null) {
+			const t = turns[streamingIndex];
+			const tools = (t.tools ?? []).map((tool) =>
+				tool.id === data.id && tool.kind === 'tool_use'
+					? { ...tool, result: data.result, is_error: data.is_error }
+					: tool
+			);
+			turns[streamingIndex] = { role: 'assistant', content: t.content, tools };
 			autoscroll();
 		} else if (event === 'error') {
 			errorMsg = data.message ?? 'Erreur inconnue';
@@ -635,10 +677,27 @@
 							<span class="speaking-dot"></span>
 						{/if}
 					</div>
+					{#if turn.tools && turn.tools.length > 0}
+						<div class="tool-events">
+							{#each turn.tools as ev (ev.id)}
+								<span class="tool-chip" class:err={ev.is_error}>
+									🔧 {ev.name}
+									{#if ev.name === 'update_memory' && ev.input?.section}
+										: « {ev.input.section as string} »
+									{:else if ev.name === 'read_brief' && ev.input?.date}
+										: {ev.input.date as string}
+									{/if}
+									{#if ev.result === undefined}
+										<span class="tool-pending">…</span>
+									{/if}
+								</span>
+							{/each}
+						</div>
+					{/if}
 					<div class="content">
 						{#if turn.content}
 							{turn.content}
-						{:else if i === streamingIndex}
+						{:else if i === streamingIndex && (!turn.tools || turn.tools.length === 0)}
 							<span class="thinking">…</span>
 						{/if}
 					</div>
@@ -1098,6 +1157,31 @@
 	}
 	.thinking {
 		color: #555;
+	}
+	.tool-events {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin: 0.2rem 0 0.4rem;
+	}
+	.tool-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-size: 0.75rem;
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		background: rgba(124, 58, 237, 0.15);
+		border: 1px solid rgba(124, 58, 237, 0.3);
+		color: #c4c4d8;
+	}
+	.tool-chip.err {
+		background: rgba(248, 113, 113, 0.12);
+		border-color: rgba(248, 113, 113, 0.4);
+		color: #fca5a5;
+	}
+	.tool-pending {
+		opacity: 0.5;
 	}
 	.error {
 		max-width: 800px;
