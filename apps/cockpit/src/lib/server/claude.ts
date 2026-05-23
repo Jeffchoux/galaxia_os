@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import { getAnthropicKey, getModel } from './env';
 import { loadMemory } from './memory';
-import type { Conversation, Message as DbMessage } from './db';
+import type { Conversation, Document, Message as DbMessage } from './db';
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -46,6 +47,57 @@ export function buildClaudeMessages(
 	const fromIdx = conversation?.summary_until_idx ?? 0;
 	const slice = fromIdx > 0 ? history.slice(fromIdx) : history;
 	return slice.map((m) => ({ role: m.role, content: m.content }));
+}
+
+function documentBlock(doc: Document): ContentBlockParam {
+	if (doc.content_b64 && doc.mime_type === 'application/pdf') {
+		return {
+			type: 'document',
+			source: {
+				type: 'base64',
+				media_type: 'application/pdf',
+				data: doc.content_b64
+			},
+			title: doc.filename,
+			cache_control: { type: 'ephemeral' }
+		} as ContentBlockParam;
+	}
+	const text = doc.content_text ?? '';
+	return {
+		type: 'document',
+		source: {
+			type: 'text',
+			media_type: 'text/plain',
+			data: text
+		},
+		title: doc.filename,
+		cache_control: { type: 'ephemeral' }
+	} as ContentBlockParam;
+}
+
+// Construit les MessageParam pour l'API Claude, en injectant les documents
+// attachés à la conversation dans le DERNIER user message (ils suivent ainsi
+// la conv via le cache de prompt + l'historique).
+export function buildMessageParams(
+	conversation: Conversation | null,
+	history: DbMessage[],
+	docs: Document[]
+): MessageParam[] {
+	const turns = buildClaudeMessages(conversation, history);
+	const params: MessageParam[] = turns.map((t) => ({ role: t.role, content: t.content }));
+	if (docs.length === 0 || params.length === 0) return params;
+
+	const lastIdx = params.length - 1;
+	const last = params[lastIdx];
+	if (last.role !== 'user') return params;
+
+	const userText = typeof last.content === 'string' ? last.content : '';
+	const blocks: ContentBlockParam[] = [
+		...docs.map(documentBlock),
+		{ type: 'text', text: userText }
+	];
+	params[lastIdx] = { role: 'user', content: blocks };
+	return params;
 }
 
 export function shouldSummarize(
@@ -101,13 +153,14 @@ export async function summarizeHistory(
 
 export async function* streamReply(
 	conversation: Conversation | null,
-	history: DbMessage[]
+	history: DbMessage[],
+	docs: Document[] = []
 ): AsyncGenerator<string, void, unknown> {
 	const stream = client().messages.stream({
 		model: getModel(),
 		max_tokens: 4096,
 		system: buildSystemPrompt(conversation),
-		messages: buildClaudeMessages(conversation, history)
+		messages: buildMessageParams(conversation, history, docs)
 	});
 
 	for await (const event of stream) {

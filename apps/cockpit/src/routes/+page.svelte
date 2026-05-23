@@ -9,11 +9,23 @@
 	let { data }: Props = $props();
 
 	type Turn = { role: 'user' | 'assistant'; content: string };
+	type DocChip = { id: string; filename: string; mime_type: string; size: number };
 
 	let conversationId = $state<string | null>(data.active?.id ?? null);
 	let turns = $state<Turn[]>(
 		data.messages.map((m) => ({ role: m.role, content: m.content }))
 	);
+	let documents = $state<DocChip[]>(
+		data.documents.map((d) => ({
+			id: d.id,
+			filename: d.filename,
+			mime_type: d.mime_type,
+			size: d.size
+		}))
+	);
+	let uploading = $state(false);
+	let dragOver = $state(false);
+	let fileInput: HTMLInputElement | undefined = $state();
 	let draft = $state('');
 	let sending = $state(false);
 	let streamingIndex = $state<number | null>(null);
@@ -330,9 +342,102 @@
 	async function newConversation() {
 		conversationId = null;
 		turns = [];
+		documents = [];
 		errorMsg = null;
 		stopSpeaking();
 		history.replaceState({}, '', '/');
+	}
+
+	// ─── documents ─────────────────────────────────────────────────────────
+	async function ensureConversation(): Promise<string> {
+		if (conversationId) return conversationId;
+		const res = await fetch('/api/conversations', { method: 'POST' });
+		if (!res.ok) throw new Error(`Impossible de créer une conversation (HTTP ${res.status})`);
+		const { conversation } = await res.json();
+		conversationId = conversation.id;
+		history.replaceState({}, '', `/?c=${conversation.id}`);
+		return conversation.id;
+	}
+
+	async function uploadFiles(files: FileList | File[]) {
+		if (uploading) return;
+		const list = Array.from(files);
+		if (list.length === 0) return;
+
+		let convId: string;
+		try {
+			convId = await ensureConversation();
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : String(e);
+			return;
+		}
+
+		uploading = true;
+		errorMsg = null;
+		try {
+			for (const f of list) {
+				const fd = new FormData();
+				fd.append('file', f);
+				const res = await fetch(`/api/documents?conversation_id=${convId}`, {
+					method: 'POST',
+					body: fd
+				});
+				if (!res.ok) {
+					const body = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+					throw new Error(`${f.name}: ${body.message ?? res.statusText}`);
+				}
+				const { document: doc } = await res.json();
+				documents = [...documents, doc];
+			}
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : String(e);
+		} finally {
+			uploading = false;
+			if (fileInput) fileInput.value = '';
+		}
+	}
+
+	async function removeDoc(id: string) {
+		if (!conversationId) return;
+		try {
+			const res = await fetch(`/api/documents/${id}?conversation_id=${conversationId}`, {
+				method: 'DELETE'
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			documents = documents.filter((d) => d.id !== id);
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function onDragOver(e: DragEvent) {
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+		dragOver = true;
+	}
+
+	function onDragLeave(e: DragEvent) {
+		// Évite le flicker quand on survole un enfant
+		if (e.target === e.currentTarget) dragOver = false;
+	}
+
+	function onDrop(e: DragEvent) {
+		e.preventDefault();
+		dragOver = false;
+		if (!e.dataTransfer?.files?.length) return;
+		uploadFiles(e.dataTransfer.files);
+	}
+
+	function fmtBytes(n: number): string {
+		if (n < 1024) return `${n} o`;
+		if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} Ko`;
+		return `${(n / 1024 / 1024).toFixed(1)} Mo`;
+	}
+
+	function docIcon(mime: string): string {
+		if (mime === 'application/pdf') return '📄';
+		if (mime.includes('markdown')) return '📝';
+		return '📃';
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -475,42 +580,96 @@
 			{/if}
 		</section>
 
-		<form class="composer" onsubmit={send}>
-			<button
-				type="button"
-				class="mic"
-				class:listening
-				onclick={toggleListening}
-				disabled={!voiceSupported.stt || sending}
-				title={voiceSupported.stt
-					? listening
-						? 'Stop'
-						: 'Parler (Chrome/Edge/Safari)'
-					: 'Reconnaissance vocale non supportée par ce navigateur'}
-				aria-label={listening ? 'Arrêter le micro' : 'Démarrer le micro'}
-			>
-				{listening ? '⏹' : '🎤'}
-			</button>
-			<div class="input-wrap">
-				<textarea
-					bind:value={draft}
-					onkeydown={onKey}
-					placeholder={listening
-						? 'Écoute…'
-						: voiceMode
-							? 'Parle (🎤) ou écris…'
-							: 'Écris à Galaxia… (Enter pour envoyer, Shift+Enter pour saut de ligne)'}
-					rows="2"
-					disabled={sending}
-				></textarea>
-				{#if interim}
-					<div class="interim">{interim}</div>
-				{/if}
-			</div>
-			<button type="submit" disabled={sending || !draft.trim()}>
-				{sending ? '…' : 'Envoyer'}
-			</button>
-		</form>
+		<div
+			class="composer-wrap"
+			class:drag={dragOver}
+			ondragover={onDragOver}
+			ondragleave={onDragLeave}
+			ondrop={onDrop}
+			role="region"
+			aria-label="Zone de saisie"
+		>
+			{#if documents.length > 0}
+				<div class="doc-chips">
+					{#each documents as doc (doc.id)}
+						<div class="chip" title="{doc.mime_type} · {fmtBytes(doc.size)}">
+							<span class="icon">{docIcon(doc.mime_type)}</span>
+							<span class="name">{doc.filename}</span>
+							<button
+								type="button"
+								class="remove"
+								onclick={() => removeDoc(doc.id)}
+								aria-label="Retirer {doc.filename}"
+							>×</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			<form class="composer" onsubmit={send}>
+				<input
+					type="file"
+					bind:this={fileInput}
+					accept="application/pdf,text/plain,text/markdown,.md,.markdown,.txt,.pdf"
+					multiple
+					style="display: none"
+					onchange={(e) => {
+						const t = e.currentTarget as HTMLInputElement;
+						if (t.files) uploadFiles(t.files);
+					}}
+				/>
+				<button
+					type="button"
+					class="attach"
+					onclick={() => fileInput?.click()}
+					disabled={uploading || sending}
+					title="Joindre PDF / Markdown / TXT (drag-drop accepté)"
+					aria-label="Joindre un document"
+				>
+					{uploading ? '…' : '📎'}
+				</button>
+				<button
+					type="button"
+					class="mic"
+					class:listening
+					onclick={toggleListening}
+					disabled={!voiceSupported.stt || sending}
+					title={voiceSupported.stt
+						? listening
+							? 'Stop'
+							: 'Parler (Chrome/Edge/Safari)'
+						: 'Reconnaissance vocale non supportée par ce navigateur'}
+					aria-label={listening ? 'Arrêter le micro' : 'Démarrer le micro'}
+				>
+					{listening ? '⏹' : '🎤'}
+				</button>
+				<div class="input-wrap">
+					<textarea
+						bind:value={draft}
+						onkeydown={onKey}
+						placeholder={listening
+							? 'Écoute…'
+							: voiceMode
+								? 'Parle (🎤) ou écris…'
+								: documents.length > 0
+									? 'Pose ta question sur le(s) document(s) joint(s)…'
+									: 'Écris à Galaxia… (Enter pour envoyer, Shift+Enter pour saut de ligne)'}
+						rows="2"
+						disabled={sending}
+					></textarea>
+					{#if interim}
+						<div class="interim">{interim}</div>
+					{/if}
+				</div>
+				<button type="submit" disabled={sending || !draft.trim()}>
+					{sending ? '…' : 'Envoyer'}
+				</button>
+			</form>
+
+			{#if dragOver}
+				<div class="drag-overlay">Lâche ici — PDF / Markdown / TXT</div>
+			{/if}
+		</div>
 	</main>
 </div>
 
@@ -923,5 +1082,98 @@
 	.composer > button[type='submit']:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
+	}
+
+	/* — Cowork : documents joints — */
+	.composer-wrap {
+		position: relative;
+		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		transition: background 0.15s;
+	}
+	.composer-wrap.drag {
+		background: rgba(124, 58, 237, 0.08);
+	}
+	.composer-wrap > .composer {
+		border-top: none;
+	}
+	.doc-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0.75rem 1.5rem 0;
+		max-width: 800px;
+		margin: 0 auto;
+	}
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		background: rgba(124, 58, 237, 0.12);
+		border: 1px solid rgba(124, 58, 237, 0.3);
+		border-radius: 16px;
+		padding: 0.25rem 0.55rem 0.25rem 0.65rem;
+		font-size: 0.8rem;
+		color: #e9e9f4;
+		max-width: 280px;
+	}
+	.chip .icon {
+		font-size: 0.9rem;
+	}
+	.chip .name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 200px;
+	}
+	.chip .remove {
+		background: none;
+		border: none;
+		color: #b9b9d0;
+		cursor: pointer;
+		font-size: 1rem;
+		line-height: 1;
+		padding: 0 0.15rem;
+		border-radius: 50%;
+	}
+	.chip .remove:hover {
+		color: #fff;
+		background: rgba(248, 113, 113, 0.3);
+	}
+	.attach {
+		flex-shrink: 0;
+		width: 2.7rem;
+		height: 2.7rem;
+		padding: 0;
+		background: rgba(124, 58, 237, 0.1);
+		color: #b9b9d0;
+		border: 1px solid rgba(124, 58, 237, 0.25);
+		border-radius: 10px;
+		font-size: 1.05rem;
+		cursor: pointer;
+		display: grid;
+		place-items: center;
+		transition: all 0.15s;
+	}
+	.attach:hover:not(:disabled) {
+		background: rgba(124, 58, 237, 0.25);
+		color: #fff;
+	}
+	.attach:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.drag-overlay {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		background: rgba(20, 18, 40, 0.85);
+		color: #c084fc;
+		font-weight: 600;
+		font-size: 1.05rem;
+		pointer-events: none;
+		border: 2px dashed #7c3aed;
+		border-radius: 8px;
+		margin: 0.5rem;
 	}
 </style>
