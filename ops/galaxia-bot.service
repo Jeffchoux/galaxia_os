@@ -1,0 +1,28 @@
+[Unit]
+Description=Galaxia Telegram Bot — URLs (TikTok/X) + documents/photos vers cockpit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/agents/telegram
+EnvironmentFile=/home/galaxia/galaxia-project/agents/telegram/.env
+# Le venv est partagé avec le pipeline digest (toolchain Whisper + telegram-bot).
+# Pour une galaxie fille PME packagée, créer un venv dédié dans ./venv et adapter.
+ExecStart=/home/galaxia/.claude/galaxia/venv/bin/python /home/galaxia/galaxia-project/agents/telegram/telegram_bot.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/galaxia/.claude/galaxia /home/galaxia/galaxia-project/apps/cockpit/data
+
+[Install]
+WantedBy=multi-user.target
