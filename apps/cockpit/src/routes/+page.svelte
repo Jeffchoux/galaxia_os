@@ -26,6 +26,7 @@
 	let uploading = $state(false);
 	let dragOver = $state(false);
 	let fileInput: HTMLInputElement | undefined = $state();
+	let previewDoc = $state<DocChip | null>(null);
 	let draft = $state('');
 	let sending = $state(false);
 	let streamingIndex = $state<number | null>(null);
@@ -481,6 +482,18 @@
 		return '📃';
 	}
 
+	function openPreview(doc: DocChip) {
+		previewDoc = doc;
+	}
+
+	function closePreview() {
+		previewDoc = null;
+	}
+
+	function onPreviewKey(e: KeyboardEvent) {
+		if (e.key === 'Escape') closePreview();
+	}
+
 	function onKey(e: KeyboardEvent) {
 		if (e.key === 'Enter' && !e.shiftKey) {
 			e.preventDefault();
@@ -648,8 +661,15 @@
 				<div class="doc-chips">
 					{#each documents as doc (doc.id)}
 						<div class="chip" title="{doc.mime_type} · {fmtBytes(doc.size)}">
-							<span class="icon">{docIcon(doc.mime_type)}</span>
-							<span class="name">{doc.filename}</span>
+							<button
+								type="button"
+								class="chip-open"
+								onclick={() => openPreview(doc)}
+								aria-label="Aperçu de {doc.filename}"
+							>
+								<span class="icon">{docIcon(doc.mime_type)}</span>
+								<span class="name">{doc.filename}</span>
+							</button>
 							<button
 								type="button"
 								class="remove"
@@ -727,6 +747,41 @@
 		</div>
 	</main>
 </div>
+
+{#if previewDoc}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="preview-backdrop" onclick={closePreview} onkeydown={onPreviewKey} tabindex="-1">
+		<div
+			class="preview-modal"
+			onclick={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Aperçu du document {previewDoc.filename}"
+		>
+			<header class="preview-head">
+				<span class="preview-icon">{docIcon(previewDoc.mime_type)}</span>
+				<span class="preview-name">{previewDoc.filename}</span>
+				<span class="preview-meta">{fmtBytes(previewDoc.size)}</span>
+				<a
+					class="preview-dl"
+					href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+					target="_blank"
+					rel="noopener"
+					title="Ouvrir dans un nouvel onglet"
+				>↗</a>
+				<button class="preview-close" onclick={closePreview} aria-label="Fermer">×</button>
+			</header>
+			<iframe
+				class="preview-iframe"
+				title={previewDoc.filename}
+				src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+			></iframe>
+		</div>
+	</div>
+{/if}
+
+<svelte:window onkeydown={onPreviewKey} />
 
 <style>
 	:global(body) {
@@ -1179,10 +1234,26 @@
 		background: rgba(124, 58, 237, 0.12);
 		border: 1px solid rgba(124, 58, 237, 0.3);
 		border-radius: 16px;
-		padding: 0.25rem 0.55rem 0.25rem 0.65rem;
+		padding: 0.15rem 0.4rem 0.15rem 0.15rem;
 		font-size: 0.8rem;
 		color: #e9e9f4;
 		max-width: 280px;
+		transition: background 0.15s;
+	}
+	.chip:hover {
+		background: rgba(124, 58, 237, 0.22);
+	}
+	.chip-open {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		background: none;
+		border: none;
+		color: inherit;
+		font: inherit;
+		cursor: pointer;
+		padding: 0.1rem 0 0.1rem 0.5rem;
+		text-align: left;
 	}
 	.chip .icon {
 		font-size: 0.9rem;
@@ -1243,5 +1314,82 @@
 		border: 2px dashed #7c3aed;
 		border-radius: 8px;
 		margin: 0.5rem;
+	}
+
+	/* — Preview modal — */
+	.preview-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(5, 5, 12, 0.78);
+		backdrop-filter: blur(4px);
+		display: grid;
+		place-items: center;
+		z-index: 100;
+		padding: 2rem;
+		animation: fade-in 0.15s ease-out;
+	}
+	@keyframes fade-in {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+	.preview-modal {
+		display: flex;
+		flex-direction: column;
+		width: min(900px, 96vw);
+		height: min(85vh, 900px);
+		background: #0c0a18;
+		border: 1px solid rgba(124, 58, 237, 0.3);
+		border-radius: 12px;
+		box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+		overflow: hidden;
+	}
+	.preview-head {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+		background: rgba(20, 18, 32, 0.5);
+	}
+	.preview-icon {
+		font-size: 1.1rem;
+	}
+	.preview-name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-weight: 500;
+		color: #fff;
+	}
+	.preview-meta {
+		color: #6b6b85;
+		font-size: 0.8rem;
+		flex-shrink: 0;
+	}
+	.preview-dl, .preview-close {
+		flex-shrink: 0;
+		width: 2rem;
+		height: 2rem;
+		display: grid;
+		place-items: center;
+		background: rgba(124, 58, 237, 0.15);
+		color: #b9b9d0;
+		border: 1px solid rgba(124, 58, 237, 0.25);
+		border-radius: 6px;
+		text-decoration: none;
+		font-size: 1.1rem;
+		cursor: pointer;
+		line-height: 1;
+	}
+	.preview-dl:hover, .preview-close:hover {
+		background: rgba(124, 58, 237, 0.3);
+		color: #fff;
+	}
+	.preview-iframe {
+		flex: 1;
+		width: 100%;
+		border: none;
+		background: #07060c;
 	}
 </style>
