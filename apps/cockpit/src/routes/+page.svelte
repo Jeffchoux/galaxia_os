@@ -51,12 +51,42 @@
 	const VAD_THRESHOLD = 0.04; // RMS — ajusté empiriquement avec echoCancellation actif
 	const VAD_TRIGGER_FRAMES = 4; // ~70ms à 60fps : debounce
 
+	// Wake word — filtre les phrases qui ne commencent pas par "(Hey) Galaxia"
+	let wakeWord = $state(false);
+	let wakeFlash = $state(false); // mini feedback visuel quand le wake est détecté
+	const WAKE_RE = /^\s*(hey\s+|hé\s+|eh\s+|ok\s+|salut\s+)?galaxia[\s,.!?:;]*(.*)$/i;
+
 	onMount(() => {
 		if (typeof window === 'undefined') return;
 		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 		voiceSupported.stt = !!SR;
 		voiceSupported.tts = !!window.speechSynthesis;
+		// Restaure les préférences voix
+		try {
+			wakeWord = localStorage.getItem('galaxia.wakeWord') === '1';
+		} catch {
+			/* localStorage indispo */
+		}
 	});
+
+	$effect(() => {
+		try {
+			if (typeof window !== 'undefined') {
+				localStorage.setItem('galaxia.wakeWord', wakeWord ? '1' : '0');
+			}
+		} catch {
+			/* idem */
+		}
+	});
+
+	function toggleWakeWord() {
+		wakeWord = !wakeWord;
+	}
+
+	function flashWake() {
+		wakeFlash = true;
+		setTimeout(() => (wakeFlash = false), 600);
+	}
 
 	function getRecognition(): any {
 		if (recognition) return recognition;
@@ -78,7 +108,18 @@
 			}
 			if (interimTranscript) interim = interimTranscript;
 			if (finalTranscript) {
-				draft = (draft + ' ' + finalTranscript).trim();
+				if (wakeWord) {
+					// Filtre : on n'accepte que ce qui suit "(Hey) Galaxia"
+					const m = finalTranscript.match(WAKE_RE);
+					if (m) {
+						const stripped = (m[2] ?? '').trim();
+						flashWake();
+						draft = (draft + ' ' + stripped).trim();
+					}
+					// Si pas de match, on ignore — la voix qui ne s'adresse pas à Galaxia est filtrée
+				} else {
+					draft = (draft + ' ' + finalTranscript).trim();
+				}
 				interim = '';
 			}
 		};
@@ -528,6 +569,20 @@
 				{/if}
 				<button
 					class="voice-toggle"
+					class:on={wakeWord}
+					class:flash={wakeFlash}
+					onclick={toggleWakeWord}
+					disabled={!voiceSupported.stt}
+					title={voiceSupported.stt
+						? wakeWord
+							? "Wake word actif — il faut commencer ton message par 'Galaxia' ou 'Hey Galaxia'"
+							: 'Activer le wake word — seules les phrases commençant par Galaxia déclenchent l\'envoi'
+						: 'Reconnaissance vocale non supportée par ce navigateur'}
+				>
+					{wakeWord ? '👂 Wake on' : '👂 Wake'}
+				</button>
+				<button
+					class="voice-toggle"
 					class:on={voiceMode}
 					onclick={toggleVoiceMode}
 					disabled={!voiceSupported.tts}
@@ -894,6 +949,19 @@
 		background: #7c3aed;
 		color: #fff;
 		border-color: #7c3aed;
+	}
+	.voice-toggle.flash {
+		background: #c084fc;
+		border-color: #c084fc;
+		animation: wake-flash 0.6s ease-out;
+	}
+	@keyframes wake-flash {
+		0% {
+			box-shadow: 0 0 0 0 rgba(192, 132, 252, 0.7);
+		}
+		100% {
+			box-shadow: 0 0 0 14px rgba(192, 132, 252, 0);
+		}
 	}
 	.voice-toggle:disabled {
 		opacity: 0.4;
