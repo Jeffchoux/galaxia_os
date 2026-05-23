@@ -1,8 +1,25 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { getDbPath } from './env';
+import { getAnthropicKey, getDbPath } from './env';
 import { listBriefs, readBrief } from './briefs';
 import { callMcpTool, listMcpTools, hasMcpTool } from './mcp';
+
+let _haiku: Anthropic | null = null;
+function haiku(): Anthropic {
+	if (!_haiku) _haiku = new Anthropic({ apiKey: getAnthropicKey() });
+	return _haiku;
+}
+
+const REORGANIZE_SYSTEM = `Tu reçois le contenu actuel d'un fichier memory.md et une nouvelle note à intégrer. Tu renvoies UNIQUEMENT le nouveau contenu complet du fichier, sans préambule, sans bloc code markdown autour.
+
+Règles :
+1. Si la note est déjà couverte (texte identique ou information redondante), retourne le fichier inchangé (économise les écritures inutiles).
+2. Si la note précise/complète une ligne existante, remplace cette ligne (ne duplique pas).
+3. Sinon, ajoute la note à la section indiquée. Crée la section h2 si elle n'existe pas.
+4. Ne réécris pas ce que tu n'as pas besoin de toucher. Préserve la structure h1, l'ordre des sections, le ton et le style.
+5. Format : markdown, sections h2 (##), puces ou phrases courtes. Pas de bloc code, pas de méta-commentaire.
+6. Limite : ne grossis pas le fichier de plus de 30% en une fois. Si tu détectes du contenu redondant en cumul, tu peux dédoublonner.`;
 
 // Schéma MCP-compatible (Anthropic tools = MCP tools, même format JSON Schema).
 export interface GalaxiaTool {
@@ -76,32 +93,73 @@ function escapeRegex(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function doUpdateMemory(section: string, note: string): string {
+function fallbackAppend(initial: string, safeSection: string, safeNote: string): string {
+	const sectionHeader = `## ${safeSection}`;
+	const sectionRegex = new RegExp(`^${escapeRegex(sectionHeader)}\\s*$`, 'm');
+	if (sectionRegex.test(initial)) {
+		return initial.replace(
+			new RegExp(`(^${escapeRegex(sectionHeader)}\\s*$[\\s\\S]*?)(?=^##\\s|\\Z)`, 'm'),
+			(block) => block.trimEnd() + `\n\n${safeNote}\n`
+		);
+	}
+	return initial.trimEnd() + `\n\n${sectionHeader}\n\n${safeNote}\n`;
+}
+
+async function doUpdateMemory(section: string, note: string): Promise<string> {
 	const path = memoryPath();
 	const safeSection = section.trim() || 'Notes libres';
 	const safeNote = note.trim();
 	if (!safeNote) return 'Note vide, rien écrit.';
 
-	const initial = existsSync(path) ? readFileSync(path, 'utf-8') : '# Mémoire persistante — Galaxia\n';
-	const sectionHeader = `## ${safeSection}`;
-	const sectionRegex = new RegExp(`^${escapeRegex(sectionHeader)}\\s*$`, 'm');
+	const initial = existsSync(path)
+		? readFileSync(path, 'utf-8')
+		: '# Mémoire persistante — Galaxia\n';
 
-	let next: string;
-	if (sectionRegex.test(initial)) {
-		// Insère la note à la fin de la section (avant la prochaine section h2 ou EOF)
-		next = initial.replace(
-			new RegExp(
-				`(^${escapeRegex(sectionHeader)}\\s*$[\\s\\S]*?)(?=^##\\s|\\Z)`,
-				'm'
-			),
-			(block) => block.trimEnd() + `\n\n${safeNote}\n`
-		);
-	} else {
-		next = initial.trimEnd() + `\n\n${sectionHeader}\n\n${safeNote}\n`;
+	let next = initial;
+	let viaHaiku = false;
+
+	// Tentative Haiku : réorganisation intelligente (dédoublonnage, fusion,
+	// remplacement). Échec → fallback append simple.
+	try {
+		const result = await haiku().messages.create({
+			model: 'claude-haiku-4-5-20251001',
+			max_tokens: 4000,
+			system: REORGANIZE_SYSTEM,
+			messages: [
+				{
+					role: 'user',
+					content: `Section visée : ${safeSection}\n\nNote à intégrer :\n${safeNote}\n\n---\n\nContenu actuel de memory.md :\n\n${initial}`
+				}
+			]
+		});
+		const block = result.content[0];
+		if (block?.type === 'text') {
+			const text = block.text.trim();
+			// Garde-fous : doit ressembler à un memory.md (h1 présent, taille
+			// raisonnable). Sinon on garde l'initial puis fallback append.
+			if (text.startsWith('# ') && text.length < initial.length * 2 + 1000) {
+				next = text.endsWith('\n') ? text : text + '\n';
+				viaHaiku = true;
+			}
+		}
+	} catch {
+		// silencieux : on tombe en fallback
+	}
+
+	if (!viaHaiku) {
+		next = fallbackAppend(initial, safeSection, safeNote);
+	}
+
+	// Court-circuit : si Haiku a décidé que rien ne change, ne re-write pas
+	// (préserve mtime pour le cache de loadMemory()).
+	if (next.trim() === initial.trim()) {
+		return 'Mémoire inchangée (Haiku a estimé que la note était déjà couverte).';
 	}
 
 	writeFileSync(path, next, 'utf-8');
-	return `Mémoire mise à jour, section « ${safeSection} ».`;
+	return viaHaiku
+		? `Mémoire mise à jour intelligemment (Haiku, section « ${safeSection} »).`
+		: `Mémoire mise à jour (append simple, section « ${safeSection} »).`;
 }
 
 function doReadBrief(date?: string): string {
@@ -132,7 +190,10 @@ export async function executeTool(
 	try {
 		if (name === 'update_memory') {
 			return {
-				result: doUpdateMemory(String(input.section ?? ''), String(input.note ?? ''))
+				result: await doUpdateMemory(
+					String(input.section ?? ''),
+					String(input.note ?? '')
+				)
 			};
 		}
 		if (name === 'read_brief') {
