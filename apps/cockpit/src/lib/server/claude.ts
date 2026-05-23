@@ -3,7 +3,7 @@ import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resource
 import { getAnthropicKey, getModel } from './env';
 import { loadMemory } from './memory';
 import type { Conversation, Document, Message as DbMessage } from './db';
-import { GALAXIA_TOOLS, executeTool } from './tools';
+import { executeTool, loadAllTools } from './tools';
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -20,6 +20,7 @@ Style : direct, sans flagornerie, sans phrases d'introduction inutiles. Réponse
 Tu disposes de tools (function calling) :
 - update_memory : utilise-le PROACTIVEMENT dès que Jeff t'apprend quelque chose qu'il faudrait retenir entre sessions (préférence, projet, contact, décision). Ne lui demande pas la permission, écris simplement la note et continue. Reste sobre — note ce qui est durable, pas chaque détail conversationnel.
 - read_brief / list_briefs : pour récupérer un brief du pipeline digest si Jeff y fait référence ou si c'est utile au contexte.
+- Filesystem (via MCP) : tu peux lire et explorer les fichiers de /home/galaxia/galaxia-project (le repo Galaxia), /home/galaxia/.claude/galaxia/briefs et /home/galaxia/.claude/galaxia/knowledge. Sers-t'en quand Jeff te demande d'aller voir un fichier, d'expliquer une partie du code, ou de chercher quelque chose dans le projet.
 
 Tu n'as pas besoin d'annoncer chaque tool call ; agis et continue.`;
 
@@ -203,6 +204,7 @@ export async function* streamReply(
 ): AsyncGenerator<StreamEvent, void, unknown> {
 	const messages = buildMessageParams(conversation, history, docs);
 	const system = buildSystemPrompt(conversation);
+	const allTools = await loadAllTools();
 
 	for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 		const stream = client().messages.stream({
@@ -210,9 +212,9 @@ export async function* streamReply(
 			max_tokens: 4096,
 			system,
 			messages,
-			// Cast : GALAXIA_TOOLS suit le schema MCP/Anthropic, mais nos types maison
-			// sont volontairement simplifiés (pas de cache_control etc.).
-			tools: GALAXIA_TOOLS as unknown as Anthropic.Tool[]
+			// allTools = natifs Galaxia + tous les MCP servers connectés. Schema
+			// JSON commun, donc cast safe.
+			tools: allTools as unknown as Anthropic.Tool[]
 		});
 
 		let currentText = '';

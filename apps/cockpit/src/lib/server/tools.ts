@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { getDbPath } from './env';
 import { listBriefs, readBrief } from './briefs';
+import { callMcpTool, listMcpTools, hasMcpTool } from './mcp';
 
 // Schéma MCP-compatible (Anthropic tools = MCP tools, même format JSON Schema).
 export interface GalaxiaTool {
@@ -122,6 +123,8 @@ function doListBriefs(limit?: number): string {
 	return all.map((b) => `- ${b.date} — ${b.title}${b.is_fallback ? ' [fallback]' : ''}`).join('\n');
 }
 
+const NATIVE_NAMES = new Set(['update_memory', 'read_brief', 'list_briefs']);
+
 export async function executeTool(
 	name: string,
 	input: Record<string, unknown>
@@ -140,8 +143,18 @@ export async function executeTool(
 			const lim = typeof input.limit === 'number' ? input.limit : undefined;
 			return { result: doListBriefs(lim) };
 		}
+		// Pas un tool natif : on délègue à MCP si un serveur l'expose.
+		if (!NATIVE_NAMES.has(name) && (await hasMcpTool(name))) {
+			return await callMcpTool(name, input);
+		}
 		return { result: `Tool inconnu : ${name}`, is_error: true };
 	} catch (e) {
 		return { result: e instanceof Error ? e.message : String(e), is_error: true };
 	}
+}
+
+// Liste fusionnée native + MCP. Async parce que la découverte MCP fait du I/O.
+export async function loadAllTools(): Promise<GalaxiaTool[]> {
+	const mcp = await listMcpTools();
+	return [...GALAXIA_TOOLS, ...mcp];
 }
