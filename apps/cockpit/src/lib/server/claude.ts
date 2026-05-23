@@ -49,7 +49,32 @@ export function buildClaudeMessages(
 	return slice.map((m) => ({ role: m.role, content: m.content }));
 }
 
+const IMAGE_MIMES = new Set([
+	'image/jpeg',
+	'image/png',
+	'image/webp',
+	'image/gif'
+]);
+
 function documentBlock(doc: Document): ContentBlockParam {
+	if (doc.content_b64 && IMAGE_MIMES.has(doc.mime_type)) {
+		// Bloc vision Claude. Pas de `title` sur les images (le SDK ne le supporte
+		// pas), donc on rajoute juste le filename dans le texte qui suit en aval
+		// si nécessaire — pour l'instant Claude voit l'image seule.
+		return {
+			type: 'image',
+			source: {
+				type: 'base64',
+				media_type: doc.mime_type as
+					| 'image/jpeg'
+					| 'image/png'
+					| 'image/webp'
+					| 'image/gif',
+				data: doc.content_b64
+			},
+			cache_control: { type: 'ephemeral' }
+		} as ContentBlockParam;
+	}
 	if (doc.content_b64 && doc.mime_type === 'application/pdf') {
 		return {
 			type: 'document',
@@ -92,10 +117,16 @@ export function buildMessageParams(
 	if (last.role !== 'user') return params;
 
 	const userText = typeof last.content === 'string' ? last.content : '';
-	const blocks: ContentBlockParam[] = [
-		...docs.map(documentBlock),
-		{ type: 'text', text: userText }
-	];
+	const blocks: ContentBlockParam[] = [];
+	for (const doc of docs) {
+		// Pour les images, on précède le bloc image d'un label texte (le bloc image
+		// SDK n'accepte pas de `title`) — Claude voit ainsi le filename associé.
+		if (IMAGE_MIMES.has(doc.mime_type)) {
+			blocks.push({ type: 'text', text: `[Image jointe : ${doc.filename}]` });
+		}
+		blocks.push(documentBlock(doc));
+	}
+	blocks.push({ type: 'text', text: userText });
 	params[lastIdx] = { role: 'user', content: blocks };
 	return params;
 }
