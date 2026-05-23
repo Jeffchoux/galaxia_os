@@ -281,6 +281,23 @@
 				<p class="empty">Aucune conversation pour l'instant.</p>
 			{/if}
 		</nav>
+
+		<div class="briefs-section">
+			<div class="briefs-head">
+				<span>Briefs récents</span>
+				<a href="/briefs" class="all-link">tous →</a>
+			</div>
+			{#each data.briefs as brief (brief.filename)}
+				<a class="brief-item" class:fallback={brief.is_fallback} href={`/briefs/${brief.filename}`}>
+					<span class="brief-title">{brief.title}</span>
+					<span class="brief-date">{brief.date.slice(5)}</span>
+				</a>
+			{/each}
+			{#if data.briefs.length === 0}
+				<p class="empty">Aucun brief.</p>
+			{/if}
+		</div>
+
 		<form method="POST" action="/logout" class="logout">
 			<button type="submit" class="ghost">Se déconnecter</button>
 		</form>
@@ -485,6 +502,62 @@
 		padding: 0.5rem;
 		color: #555;
 		font-size: 0.85rem;
+	}
+	.briefs-section {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		padding-top: 0.5rem;
+		border-top: 1px solid rgba(124, 58, 237, 0.15);
+	}
+	.briefs-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		padding: 0.4rem 0.5rem 0.2rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: #6b6b85;
+		font-weight: 600;
+	}
+	.all-link {
+		color: #6b6b85;
+		text-decoration: none;
+		text-transform: none;
+		letter-spacing: 0;
+		font-size: 0.75rem;
+	}
+	.all-link:hover {
+		color: #c084fc;
+	}
+	.brief-item {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.4rem 0.6rem;
+		border-radius: 6px;
+		color: #b9b9d0;
+		text-decoration: none;
+		font-size: 0.8rem;
+	}
+	.brief-item:hover {
+		background: rgba(124, 58, 237, 0.08);
+		color: #fff;
+	}
+	.brief-item.fallback {
+		opacity: 0.5;
+	}
+	.brief-title {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		flex: 1;
+	}
+	.brief-date {
+		color: #6b6b85;
+		font-size: 0.7rem;
+		flex-shrink: 0;
 	}
 	.logout {
 		margin-top: auto;
