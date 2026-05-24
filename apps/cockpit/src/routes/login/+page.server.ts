@@ -5,6 +5,7 @@ import {
 	sessionCookieOptions,
 	verifyPassword
 } from '$lib/server/auth';
+import { getAdminUser } from '$lib/server/db';
 
 export const actions: Actions = {
 	default: async ({ request, cookies, url }) => {
@@ -14,7 +15,10 @@ export const actions: Actions = {
 		if (!ok) {
 			return fail(401, { error: 'Mot de passe incorrect.' });
 		}
-		cookies.set(SESSION_COOKIE, createSession('jeff'), sessionCookieOptions());
+		// Le password est celui de l'admin (Jeff). On résout son user_id réel
+		// pour que le reste du système traite admin = user comme tout le monde.
+		const admin = getAdminUser();
+		cookies.set(SESSION_COOKIE, createSession(admin.id), sessionCookieOptions());
 		const next = url.searchParams.get('next') || '/';
 		throw redirect(303, next.startsWith('/') ? next : '/');
 	}

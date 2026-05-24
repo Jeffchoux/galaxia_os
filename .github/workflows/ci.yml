@@ -245,6 +245,9 @@ jobs:
           NODE_ENV: production
           COCKPIT_DB_PATH: ${{ runner.temp }}/cockpit-smoke/cockpit.db
           COCKPIT_BRIEFS_DIR: ${{ runner.temp }}/cockpit-smoke/briefs
+          # ADMIN_EMAIL est requis depuis Sprint 2 (multi-user). On utilise un
+          # stub : la migration provisionne un admin en base, sans envoyer de mail.
+          ADMIN_EMAIL: admin@example.test
         run: |
           mkdir -p "${{ runner.temp }}/cockpit-smoke/briefs"
           SESSION_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')" \

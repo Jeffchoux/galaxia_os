@@ -41,16 +41,17 @@ export const GET: RequestHandler = ({ url, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
 	const convId = url.searchParams.get('conversation_id');
 	if (!convId) throw error(400, 'missing conversation_id');
-	const conv = getConversation(convId);
+	const conv = getConversation(convId, locals.user.id);
 	if (!conv) throw error(404, 'conversation not found');
-	return json({ documents: listConversationDocuments(convId) });
+	return json({ documents: listConversationDocuments(convId, locals.user.id) });
 };
 
 export const POST: RequestHandler = async ({ request, url, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
+	const userId = locals.user.id;
 	const convId = url.searchParams.get('conversation_id');
 	if (!convId) throw error(400, 'missing conversation_id');
-	const conv = getConversation(convId);
+	const conv = getConversation(convId, userId);
 	if (!conv) throw error(404, 'conversation not found');
 
 	const form = await request.formData();
@@ -78,6 +79,7 @@ export const POST: RequestHandler = async ({ request, url, locals }) => {
 
 	const doc = createDocument({
 		conversation_id: convId,
+		user_id: userId,
 		filename,
 		mime_type: mime,
 		content_text: isBinary ? null : buf.toString('utf-8'),

@@ -5,6 +5,6 @@ import { createConversation } from '$lib/server/db';
 // un document avant d'avoir échangé un premier message.
 export const POST: RequestHandler = ({ locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
-	const conv = createConversation();
+	const conv = createConversation(locals.user.id);
 	return json({ conversation: conv });
 };

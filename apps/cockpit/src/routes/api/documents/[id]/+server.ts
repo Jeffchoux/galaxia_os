@@ -40,7 +40,7 @@ export const GET: RequestHandler = ({ params, url, locals }) => {
 	const convId = url.searchParams.get('conversation_id');
 	if (!convId) throw error(400, 'missing conversation_id');
 	if (!params.id) throw error(400, 'missing id');
-	const doc = getDocument(params.id);
+	const doc = getDocument(params.id, locals.user.id);
 	if (!doc || doc.conversation_id !== convId) throw error(404, 'document not found');
 
 	// Binaires (PDF + images) → on sert le contenu natif, le browser sait afficher
@@ -70,7 +70,7 @@ export const DELETE: RequestHandler = ({ params, url, locals }) => {
 	const convId = url.searchParams.get('conversation_id');
 	if (!convId) throw error(400, 'missing conversation_id');
 	if (!params.id) throw error(400, 'missing id');
-	const ok = deleteDocument(params.id, convId);
+	const ok = deleteDocument(params.id, convId, locals.user.id);
 	if (!ok) throw error(404, 'document not found');
 	return json({ ok: true });
 };
