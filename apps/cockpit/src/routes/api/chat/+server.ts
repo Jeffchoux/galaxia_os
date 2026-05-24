@@ -22,7 +22,7 @@ async function maybeSummarize(conversation: Conversation, userId: string): Promi
 		if (!refreshed) return;
 		const history = listMessages(refreshed.id, userId);
 		if (!shouldSummarize(refreshed, history)) return;
-		const { summary, until_idx } = await summarizeHistory(refreshed, history);
+		const { summary, until_idx } = await summarizeHistory(refreshed, history, userId);
 		if (summary && until_idx > refreshed.summary_until_idx) {
 			updateSummary(refreshed.id, userId, summary, until_idx);
 		}
@@ -62,7 +62,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			let assistantText = '';
 			try {
-				for await (const event of streamReply(convAtTurnStart, history, docs)) {
+				for await (const event of streamReply(convAtTurnStart, history, docs, userId)) {
 					if (event.kind === 'delta') {
 						assistantText += event.text;
 						send('delta', { text: event.text });
@@ -80,7 +80,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				appendMessage(conversation.id, userId, 'assistant', assistantText);
 
 				if (isNew) {
-					const title = await generateTitle(userMessage);
+					const title = await generateTitle(userMessage, userId, conversation.id);
 					renameConversation(conversation.id, userId, title);
 					send('title', { title });
 				}

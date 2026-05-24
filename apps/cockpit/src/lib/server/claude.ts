@@ -2,8 +2,33 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources/messages';
 import { getAnthropicKey, getModel } from './env';
 import { loadMemory } from './memory';
-import type { Conversation, Document, Message as DbMessage } from './db';
+import { recordUsage, type Conversation, type Document, type Message as DbMessage } from './db';
+import { computeCostMicros, type TokenUsage } from './pricing';
 import { executeTool, loadAllTools } from './tools';
+
+// Persiste un appel Anthropic dans la table `usage` pour le cost tracking.
+// Best-effort : on log et avale les erreurs (l'enregistrement ne doit JAMAIS
+// faire échouer le flow utilisateur). user_id null = appel anonyme (cas qui
+// ne devrait pas arriver en prod mais possible si tracking depuis un script).
+function track(
+	model: string,
+	usage: TokenUsage,
+	user_id: string | null,
+	conversation_id: string | null
+): void {
+	try {
+		recordUsage({
+			user_id,
+			conversation_id,
+			model,
+			input_tokens: usage.input_tokens,
+			output_tokens: usage.output_tokens,
+			cost_micros: computeCostMicros(model, usage)
+		});
+	} catch (e) {
+		console.error('[usage] tracking failed', e);
+	}
+}
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -157,7 +182,8 @@ export function shouldSummarize(
 
 export async function summarizeHistory(
 	conversation: Conversation,
-	history: DbMessage[]
+	history: DbMessage[],
+	userId: string | null = null
 ): Promise<{ summary: string; until_idx: number }> {
 	const fromIdx = conversation.summary_until_idx ?? 0;
 	const toIdx = history.length - KEEP_RECENT; // on garde KEEP_RECENT récents
@@ -172,8 +198,9 @@ export async function summarizeHistory(
 		.map((m) => `${m.role === 'user' ? 'Jeff' : 'Galaxia'} : ${m.content}`)
 		.join('\n\n');
 
+	const summaryModel = 'claude-haiku-4-5-20251001';
 	const result = await client().messages.create({
-		model: 'claude-haiku-4-5-20251001',
+		model: summaryModel,
 		max_tokens: 1500,
 		system:
 			'Tu résumes des échanges entre Jeff et Galaxia pour préserver le contexte sans dépasser le budget tokens. Garde : (1) les faits décidés/actés, (2) les préférences exprimées, (3) les chantiers ouverts et leur état. Style : puces, dense, factuel, français. Pas de meta-commentaire.',
@@ -184,6 +211,8 @@ export async function summarizeHistory(
 			}
 		]
 	});
+
+	track(summaryModel, result.usage, userId, conversation.id);
 
 	const block = result.content[0];
 	const summary = block?.type === 'text' ? block.text.trim() : '';
@@ -200,15 +229,18 @@ const MAX_TOOL_ROUNDS = 6;
 export async function* streamReply(
 	conversation: Conversation | null,
 	history: DbMessage[],
-	docs: Document[] = []
+	docs: Document[] = [],
+	userId: string | null = null
 ): AsyncGenerator<StreamEvent, void, unknown> {
 	const messages = buildMessageParams(conversation, history, docs);
 	const system = buildSystemPrompt(conversation);
 	const allTools = await loadAllTools();
+	const model = getModel();
+	const convId = conversation?.id ?? null;
 
 	for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 		const stream = client().messages.stream({
-			model: getModel(),
+			model,
 			max_tokens: 4096,
 			system,
 			messages,
@@ -264,6 +296,10 @@ export async function* streamReply(
 		}
 
 		const finalMsg = await stream.finalMessage();
+		// Tracking par round : chaque appel Anthropic est une ligne distincte
+		// dans `usage`. Permet de voir le coût détaillé des conversations
+		// multi-rounds (chaque round de tool use est facturé séparément).
+		track(model, finalMsg.usage, userId, convId);
 		if (finalMsg.stop_reason !== 'tool_use') return;
 
 		// Execute tool calls et reboucle
@@ -290,10 +326,15 @@ export async function* streamReply(
 	}
 }
 
-export async function generateTitle(firstUserMessage: string): Promise<string> {
+export async function generateTitle(
+	firstUserMessage: string,
+	userId: string | null = null,
+	conversationId: string | null = null
+): Promise<string> {
+	const titleModel = 'claude-haiku-4-5-20251001';
 	try {
 		const result = await client().messages.create({
-			model: 'claude-haiku-4-5-20251001',
+			model: titleModel,
 			max_tokens: 40,
 			messages: [
 				{
@@ -302,6 +343,7 @@ export async function generateTitle(firstUserMessage: string): Promise<string> {
 				}
 			]
 		});
+		track(titleModel, result.usage, userId, conversationId);
 		const block = result.content[0];
 		if (block?.type === 'text') {
 			return block.text.trim().replace(/^["'«»]|["'«».]$/g, '').slice(0, 80);
