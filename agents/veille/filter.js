@@ -3,6 +3,8 @@ export const DEFAULT_KEYWORDS = [
   'sécurité ia', 'security ai', 'ai security', 'souveraineté', 'sovereign',
   'on-premise', 'on premise', 'self-host', 'sandbox', 'guardrail',
   'small language model', 'slm', 'fine-tun', 'quantization', 'inference',
+  // modèles locaux pertinents pour la stack Galaxia (ajoutés 2026-05-24)
+  'deepseek', 'nemotron', 'whisper', 'multimodal', 'context window',
 ];
 
 export function filterItems(items, { keywords = DEFAULT_KEYWORDS, minScore = 1 } = {}) {
