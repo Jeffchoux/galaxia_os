@@ -137,3 +137,65 @@ Le sandbox tourne avec 4 plugins (browser, device-pair, phone-control, talk-voic
 Probablement un bug upstream NemoClaw (early preview 2026-03-16). À reporter sur https://github.com/NVIDIA/NemoClaw/issues, ou à investiguer pour patch local si on en a besoin pour des features Galaxia.
 
 Pas bloquant pour démarrer, mais à suivre.
+
+---
+
+## 11. (D1 roadmap) Provider mail pour le magic link de connexion
+
+**Posée le :** 2026-05-24
+**Statut :** ouverte — **bloque Sprint 2** (S24-S25)
+
+Quand on ouvre le cockpit aux utilisateurs PME (au-delà de Jeff seul), il faut un système de magic link (lien temporaire envoyé par mail) pour éviter de gérer des mots de passe par utilisateur. Il faut donc un provider mail qui envoie un email transactionnel à la demande, avec une bonne réputation IP pour ne pas finir en spam.
+
+**Options :**
+
+| Provider     | Origine | Plan gratuit            | Note                                              |
+|--------------|---------|-------------------------|---------------------------------------------------|
+| **Brevo** (ex-Sendinblue) | FR      | 300 emails/jour à vie    | Reco — souverain (RGPD natif), API claire, SDK Node maintenu |
+| Resend       | US      | 3000/mois (100/jour)    | DX excellente, mais hébergement US (RGPD via SCC) |
+| AWS SES      | US      | 62k/mois (depuis EC2)   | Le moins cher à l'échelle, mais configuration DKIM/SPF lourde |
+| Postmark     | US      | 100/mois free           | Excellente réputation IP, mais payant vite        |
+| SMTP perso (Postfix sur le VPS) | local | gratuit | Mauvais delivery (IP VPS Hetzner souvent flag), à proscrire |
+
+**Ma reco (cf. ROADMAP Q3 D1) :** **Brevo**. Cohérent avec l'identité souveraine du produit, freemium 300/jour suffit pour un pilote PME (le pic d'envoi = un login par utilisateur par jour), et on peut switcher de provider plus tard sans changer l'UX.
+
+**Impact si pas tranché :** je peux développer le magic link contre une interface abstraite (`sendMagicLink(email, token)`) et brancher Brevo par défaut. Tu peux toujours basculer en éditant `.env`. Donc je peux avancer sur Sprint 2 même sans réponse, mais la décision finale doit être prise avant la 1re PME pilote (Sprint 3).
+
+---
+
+## 12. (D2 roadmap) Identification de la PME pilote
+
+**Posée le :** 2026-05-24
+**Statut :** ouverte — **TOUT le plan trimestriel repose dessus**
+
+Sprint 3 (S26-S27) = installer Galaxia chez une **vraie** PME pilote (vrais utilisateurs, vrais documents). Tout le reste de la roadmap suppose que ce déploiement aura lieu. Si pas de PME identifiée fin juin, Sprints 4-5-6 deviennent du dev spéculatif.
+
+**Options :**
+
+- **(a) Réseau perso Jeff** — démarcher 3-5 PME que tu connais déjà (clients existants, contacts BabyRun, anciens collègues). Avantage : confiance préexistante, retour terrain rapide, pas de cycle commercial. Inconvénient : tu dois mobiliser ce capital relationnel.
+- **(b) Démarchage froid LinkedIn / cold mail** — cibler des dirigeants PME 10-50 personnes intéressés par l'IA. Long, faible taux de réponse, mais scalable.
+- **(c) Communauté open-source** — annoncer Galaxia sur HackerNews/r/selfhosted/communautés FR, attendre qu'une PME tech-savvy se manifeste. Risque : un early adopter technicien n'a pas le même profil qu'une PME pilote représentative.
+- **(d) Pas de PME en Q3, dogfooding intensif Jeff** — utiliser Galaxia toi-même à temps plein 8 semaines, repousser le pilote à Q4. Solide pour itérer, mais retarde la validation produit-marché.
+
+**Ma reco (cf. ROADMAP Q3 D2) :** **(a)** d'abord, **(b)** en backup. Date butoir : **2026-06-21** (fin S25). Si à cette date pas de candidat ferme : bascule Sprint 3 sur (d) + (b) en parallèle.
+
+**Action côté toi :** dès que tu as un candidat sérieux (≥ 1 entretien tenu), me le dire dans le chat avec : nom PME, secteur, taille (nb users à provisionner), domaine personnalisé souhaité, qui est le sponsor interne.
+
+---
+
+## 13. (D3 roadmap) LLM par défaut dans le cockpit
+
+**Posée le :** 2026-05-24
+**Statut :** ouverte — impact UX direct + facturation Anthropic
+
+Aujourd'hui le cockpit utilise `claude-opus-4-7` par défaut (`COCKPIT_MODEL` surchargeable). Opus est le plus capable mais aussi le plus cher (≈ 5× Sonnet). Quand on ouvre aux utilisateurs PME, ça peut exploser la facture si Jeff finance les requêtes Anthropic (modèle Hub & Spoke = chaque fille a ses propres clés API, donc en théorie chaque PME paie ses tokens, mais pour le pilote on va probablement leur prêter une clé).
+
+**Options :**
+
+- **(a) Garder Opus par défaut.** Simple, max qualité, mais coût élevé.
+- **(b) Sonnet par défaut + bouton "Opus" et "Local" opt-in par message.** L'utilisateur choisit explicitement quand il veut Opus (ex : tâche complexe) ou local Ollama (ex : info sensible). Cohérent avec l'identité souveraine (le local existe vraiment côté UX).
+- **(c) Local par défaut, escalade Sonnet/Opus à la demande.** Plus économique mais qualité de réponse perçue dégradée d'entrée — risque de premier contact négatif.
+
+**Ma reco (cf. ROADMAP Q3 D3) :** **(b)** — Sonnet par défaut, 3 boutons visibles (Local / Sonnet / Opus). C'est aussi cohérent avec l'anti-pattern roadmap n°7 : "max 3 LLM providers visibles dans l'UI".
+
+**Impact si pas tranché :** j'avance Sprint 2 multi-user en gardant Opus par défaut comme aujourd'hui, et je rajoute le sélecteur en Sprint 4 (boucle retour pilote). Donc on peut décider plus tard, mais avant d'ouvrir au-delà de toi.
