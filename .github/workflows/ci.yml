@@ -187,6 +187,7 @@ jobs:
           GALAXIA_DOMAIN: ''
           GALAXIA_DASHBOARD_MODE: tunnel
           GALAXIA_WAKE_WORD: 'Hey Galaxia'
+          GALAXIA_COCKPIT_PASSWORD: 'ci-test-password-do-not-use'
         run: bash scripts/wizard.sh
       - name: Assert config files were produced
         run: |
