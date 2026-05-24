@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-23 (fin de journée)** — les 5 étapes de [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §4 sont en V1 (cockpit web, voix in/out + wake word, memory, MCP, cowork V1). Détail dans § *Cockpit* plus bas.
+> Dernière révision : **2026-05-24** — skill `/run-cockpit` posé sous `apps/cockpit/.claude/skills/` ; browser-smoke cockpit branché en CI (job `cockpit-smoke`). Les 5 étapes de [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §4 sont en V1 (cockpit web, voix in/out + wake word, memory, MCP, cowork V1). Détail dans § *Cockpit* plus bas.
 
 ## Bootstrap éclair pour un nouvel agent
 
@@ -99,7 +99,7 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | ✅  | Memory tool + MCP côté cockpit (étape 2 de PRODUCT-VISION) | Résolu 2026-05-23 — auto-résumé conversations + `memory.md`, organisation Haiku v2.1, MCP servers filesystem (fixe) + GitHub/Brave (conditionnels) + Galaxia maison (stdio) |
 | ✅  | Voix in/out + wake word (étape 4 de PRODUCT-VISION)     | Résolu 2026-05-23 — Web Speech STT fr-FR, TTS streaming par phrase, wake word « Hey Galaxia » (regex sur SpeechRecognition), VAD hands-free, TTS premium Piper local FR via daemon HTTP |
 | ✅  | Cowork V1 (étape 5 de PRODUCT-VISION)                   | Résolu 2026-05-23 — upload PDF/Markdown/TXT attaché à la conversation, vision Claude pour photos (JPG/PNG/WEBP/GIF), preview docs joints (modal iframe), onglet Documents + onglet Briefs |
-| ✅  | Browser smoke test cockpit                              | Résolu 2026-05-23 — `ops/browser-smoke/test.mjs` Playwright headless 12 assertions vertes, non branché en CI (besoin cookie session) |
+| ✅  | Browser smoke test cockpit                              | Résolu 2026-05-23 — `ops/browser-smoke/test.mjs` Playwright headless 12 assertions vertes. Branché en CI le 2026-05-24 — job `cockpit-smoke` (boot cockpit stub `SESSION_SECRET`, surface publique seulement) |
 | ✅  | Bot Telegram dans le repo                               | Résolu 2026-05-23 — `agents/telegram/` (était hors repo, désormais versionné)                                                  |
 | 1   | Installation PME pilote (1ère galaxie fille réelle)     | Pré-req tous livrés (Docker packaging, install.sh, wizard, cockpit complet). Bloque sur identification d'une PME pilote (Jeff) |
 | 2   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
