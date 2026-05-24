@@ -40,6 +40,7 @@
 	let streamingIndex = $state<number | null>(null);
 	let errorMsg = $state<string | null>(null);
 	let scrollEl: HTMLElement | undefined = $state();
+	let chatAbortController: AbortController | null = null;
 
 	// ─── voix ──────────────────────────────────────────────────────────────
 	let voiceMode = $state(false);
@@ -51,14 +52,12 @@
 	let ttsBuffer = ''; // accumulé pendant le stream pour découper en phrases TTS
 
 	// VAD — détection d'interruption pendant que Galaxia parle
-	let audioCtx: AudioContext | null = null;
-	let analyser: AnalyserNode | null = null;
-	let mediaStream: MediaStream | null = null;
-	let monitorRaf: number | null = null;
-	let voiceDetectedFrames = 0;
 	let vadActive = $state(false);
-	const VAD_THRESHOLD = 0.04; // RMS — ajusté empiriquement avec echoCancellation actif
-	const VAD_TRIGGER_FRAMES = 4; // ~70ms à 60fps : debounce
+	let micVad: { destroy: () => void; start?: () => void; pause?: () => void } | null = null;
+	let speakingSinceMs = 0; // timestamp du début de l'utterance en cours
+	// Cooldown de sécurité : les premières ms d'une utterance TTS sont parfois
+	// captées même avec Silero — petit garde-fou (200ms suffisent vs 800 en RMS).
+	const VAD_COOLDOWN_MS = 200;
 
 	// Wake word — filtre les phrases qui ne commencent pas par "(Hey) Galaxia"
 	let wakeWord = $state(false);
@@ -188,7 +187,38 @@
 		}
 	}
 
-	function speakChunk(text: string) {
+	// Retire le balisage markdown du texte envoyé au TTS pour ne pas
+	// entendre "astérisque astérisque gras astérisque astérisque" et autres
+	// symboles dictés tels quels. Conserve la ponctuation (utile pour la prosodie).
+	function stripMarkdownForSpeech(input: string): string {
+		return input
+			// Fences ```code``` et `inline code` → contenu seul
+			.replace(/```[\s\S]*?```/g, ' ')
+			.replace(/`([^`]+)`/g, '$1')
+			// Images ![alt](url) → alt
+			.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+			// Liens [texte](url) → texte
+			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+			// Gras/italique **xxx** __xxx__ *xxx* _xxx_ → xxx
+			.replace(/(\*\*|__)(.+?)\1/g, '$2')
+			.replace(/(\*|_)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+			// Headings ###, ##, # en début de ligne
+			.replace(/^\s{0,3}#{1,6}\s+/gm, '')
+			// Blockquotes ">" en début de ligne
+			.replace(/^\s*>\s?/gm, '')
+			// Bullets et numéros de liste en début de ligne
+			.replace(/^\s*[-*+]\s+/gm, '')
+			.replace(/^\s*\d+\.\s+/gm, '')
+			// Tildes barrés ~~xxx~~ → xxx
+			.replace(/~~(.+?)~~/g, '$1')
+			// Espaces multiples créés par les remplacements
+			.replace(/[ \t]+/g, ' ')
+			.replace(/\n{3,}/g, '\n\n')
+			.trim();
+	}
+
+	function speakChunk(rawText: string) {
+		const text = stripMarkdownForSpeech(rawText);
 		if (!voiceMode || !text.trim()) return;
 		if (ttsBackend === 'piper') {
 			piperQueue.push(text);
@@ -200,7 +230,10 @@
 		u.lang = 'fr-FR';
 		u.rate = 1.05;
 		u.pitch = 1.0;
-		u.onstart = () => (speaking = true);
+		u.onstart = () => {
+			speaking = true;
+			speakingSinceMs = Date.now();
+		};
 		u.onend = () => {
 			// micro-délai pour laisser la queue se vider correctement entre 2 utterances
 			setTimeout(() => {
@@ -220,6 +253,7 @@
 		if (piperPumpRunning) return;
 		piperPumpRunning = true;
 		speaking = true;
+		speakingSinceMs = Date.now();
 		try {
 			while (piperQueue.length > 0 && ttsBackend === 'piper' && voiceMode) {
 				const text = piperQueue.shift()!;
@@ -263,7 +297,7 @@
 		}
 	}
 
-	function stopSpeaking() {
+	function stopSpeaking(opts: { abortLLM?: boolean } = {}) {
 		if (typeof window === 'undefined') return;
 		window.speechSynthesis.cancel();
 		piperQueue = [];
@@ -274,87 +308,86 @@
 		}
 		speaking = false;
 		ttsBuffer = '';
+		// Sur barge-in : couper aussi le flux LLM pour ne pas brûler de tokens à vide.
+		// Sur send() / clic "Couper la voix" : on garde le flux (l'utilisateur veut juste le silence).
+		if (opts.abortLLM && chatAbortController) {
+			chatAbortController.abort();
+			chatAbortController = null;
+		}
 	}
 
 	// ─── VAD (interruption naturelle) ─────────────────────────────────────
+	// Silero VAD via @ricky0123/vad-web : modèle ONNX 2.3MB, robuste à l'écho TTS,
+	// multi-langues. Assets servis depuis /vad/ (cf. static/vad/).
 	async function startAudioMonitor() {
-		if (audioCtx || typeof window === 'undefined') return;
+		if (micVad || typeof window === 'undefined') return;
 		try {
-			mediaStream = await navigator.mediaDevices.getUserMedia({
-				audio: {
-					echoCancellation: true,
-					noiseSuppression: true,
-					autoGainControl: true
+			const { MicVAD } = await import('@ricky0123/vad-web');
+			micVad = await MicVAD.new({
+				baseAssetPath: '/vad/',
+				onnxWASMBasePath: '/vad/',
+				model: 'v5',
+				positiveSpeechThreshold: 0.6,
+				negativeSpeechThreshold: 0.45,
+				minSpeechMs: 128,
+				onSpeechStart: () => {
+					// Barge-in : si Galaxia parle ET le cooldown initial est passé,
+					// on coupe son TTS + le flux LLM, et on bascule en écoute.
+					const cooledDown = Date.now() - speakingSinceMs > VAD_COOLDOWN_MS;
+					if (speaking && cooledDown) {
+						stopSpeaking({ abortLLM: true });
+						if (!listening && !sending) toggleListening();
+					}
+				},
+				onSpeechEnd: () => {
+					// Géré ailleurs (SpeechRecognition.onend dans Web Speech).
+					// Réservé pour la V2 (faster-whisper côté serveur).
 				}
 			});
-			const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
-			const ctx: AudioContext = new Ctx();
-			const source = ctx.createMediaStreamSource(mediaStream);
-			const a = ctx.createAnalyser();
-			a.fftSize = 1024;
-			source.connect(a);
-			audioCtx = ctx;
-			analyser = a;
+			await micVad.start?.();
 			vadActive = true;
-			monitorLoop();
 		} catch (e) {
-			errorMsg = "Micro non autorisé — VAD désactivé. " + (e instanceof Error ? e.message : '');
+			errorMsg = "VAD Silero indisponible — fallback désactivé. " + (e instanceof Error ? e.message : '');
 			vadActive = false;
 		}
 	}
 
 	function stopAudioMonitor() {
-		if (monitorRaf !== null) {
-			cancelAnimationFrame(monitorRaf);
-			monitorRaf = null;
+		if (micVad) {
+			try {
+				micVad.destroy();
+			} catch {
+				/* noop */
+			}
+			micVad = null;
 		}
-		if (mediaStream) {
-			mediaStream.getTracks().forEach((t) => t.stop());
-			mediaStream = null;
-		}
-		if (audioCtx) {
-			audioCtx.close().catch(() => {});
-			audioCtx = null;
-		}
-		analyser = null;
-		voiceDetectedFrames = 0;
 		vadActive = false;
 	}
 
-	function monitorLoop() {
-		if (!analyser) return;
-		const buf = new Float32Array(analyser.fftSize);
-		analyser.getFloatTimeDomainData(buf);
-		let sum = 0;
-		for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-		const rms = Math.sqrt(sum / buf.length);
-
-		if (rms > VAD_THRESHOLD) {
-			voiceDetectedFrames++;
-			// Interruption : si Galaxia parle ET que Jeff dépasse le seuil
-			// suffisamment longtemps (debounce), on coupe + on bascule en écoute.
-			if (speaking && voiceDetectedFrames >= VAD_TRIGGER_FRAMES) {
-				voiceDetectedFrames = 0;
-				stopSpeaking();
-				if (!listening && !sending) toggleListening();
-			}
-		} else {
-			voiceDetectedFrames = 0;
-		}
-
-		monitorRaf = requestAnimationFrame(monitorLoop);
-	}
+	// Premier chunk = découpe agressive sur la première virgule/point-virgule/saut de ligne
+	// pour démarrer l'audio dans les 300-500ms au lieu d'attendre la fin de phrase.
+	// Chunks suivants = phrases complètes (meilleure prosodie sur les suites).
+	const FIRST_CHUNK_BREAK = /([,;:.!?…\n])\s+/;
+	const NORMAL_CHUNK_BREAK = /([.!?…\n])\s+/;
+	const FIRST_CHUNK_MIN_CHARS = 25;
+	let firstChunkEmittedForCurrentResponse = false;
 
 	function flushTtsBuffer(force = false) {
-		// extrait toutes les phrases complètes du buffer et les TTS-eue
-		const sentenceEnd = /([.!?…\n])\s+/;
 		while (true) {
-			const m = ttsBuffer.match(sentenceEnd);
+			const useFirstChunkRule = !firstChunkEmittedForCurrentResponse;
+			const re = useFirstChunkRule ? FIRST_CHUNK_BREAK : NORMAL_CHUNK_BREAK;
+			const m = ttsBuffer.match(re);
 			if (!m || m.index === undefined) break;
+			// Sur le premier chunk, ne déclenche que si on a au moins 25 chars — pour éviter
+			// de speak "Bonjour," tout seul. Au-delà, on speak dès qu'on a un break valide.
+			if (useFirstChunkRule && m.index < FIRST_CHUNK_MIN_CHARS) break;
 			const end = m.index + m[0].length;
 			const sentence = ttsBuffer.slice(0, end).trim();
 			ttsBuffer = ttsBuffer.slice(end);
-			if (sentence) speakChunk(sentence);
+			if (sentence) {
+				speakChunk(sentence);
+				firstChunkEmittedForCurrentResponse = true;
+			}
 		}
 		if (force && ttsBuffer.trim()) {
 			speakChunk(ttsBuffer.trim());
@@ -377,16 +410,19 @@
 		sending = true;
 		stopSpeaking(); // au cas où Galaxia parlait encore d'avant
 		ttsBuffer = '';
+		firstChunkEmittedForCurrentResponse = false;
 
 		turns = [...turns, { role: 'user', content: text }, { role: 'assistant', content: '' }];
 		streamingIndex = turns.length - 1;
 		autoscroll();
 
+		chatAbortController = new AbortController();
 		try {
 			const res = await fetch('/api/chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ conversation_id: conversationId, message: text })
+				body: JSON.stringify({ conversation_id: conversationId, message: text }),
+				signal: chatAbortController.signal
 			});
 			if (!res.ok || !res.body) {
 				throw new Error(`HTTP ${res.status}`);
@@ -411,8 +447,12 @@
 			// Stream terminé : flush la queue TTS avec ce qu'il reste
 			flushTtsBuffer(true);
 		} catch (err) {
-			errorMsg = err instanceof Error ? err.message : String(err);
+			// AbortError sur barge-in : pas une erreur user-facing
+			if (!(err instanceof DOMException && err.name === 'AbortError')) {
+				errorMsg = err instanceof Error ? err.message : String(err);
+			}
 		} finally {
+			chatAbortController = null;
 			sending = false;
 			streamingIndex = null;
 			await invalidateAll();
@@ -691,8 +731,21 @@
 		<header>
 			<h1>{data.active?.title ?? 'Hey Galaxia, on parle ?'}</h1>
 			<div class="header-actions">
+				{#if voiceMode || listening || speaking || sending}
+					<span class="conv-state" class:listening class:speaking class:thinking={sending && !speaking}>
+						{#if speaking}
+							<span class="dot dot-speaking"></span> Galaxia parle
+						{:else if listening}
+							<span class="dot dot-listening"></span> Galaxia t'écoute
+						{:else if sending}
+							<span class="dot dot-thinking"></span> Galaxia réfléchit
+						{:else}
+							<span class="dot dot-idle"></span> en pause
+						{/if}
+					</span>
+				{/if}
 				{#if speaking}
-					<button class="stop-speak" onclick={stopSpeaking} title="Couper la voix">
+					<button class="stop-speak" onclick={() => stopSpeaking()} title="Couper la voix">
 						⏸ Silence
 					</button>
 				{/if}
@@ -1192,6 +1245,54 @@
 	}
 	.stop-speak:hover {
 		background: rgba(248, 113, 113, 0.25);
+	}
+
+	.conv-state {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.35rem 0.7rem;
+		border-radius: 999px;
+		font-size: 0.8rem;
+		background: rgba(255, 255, 255, 0.05);
+		color: rgba(255, 255, 255, 0.7);
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		user-select: none;
+	}
+	.conv-state .dot {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 50%;
+		display: inline-block;
+	}
+	.conv-state .dot-listening {
+		background: #34d399;
+		box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+		animation: pulse-green 1.4s infinite;
+	}
+	.conv-state .dot-thinking {
+		background: #fbbf24;
+		animation: pulse-amber 1.2s infinite;
+	}
+	.conv-state .dot-speaking {
+		background: #60a5fa;
+		animation: pulse-blue 0.9s infinite;
+	}
+	.conv-state .dot-idle {
+		background: rgba(255, 255, 255, 0.4);
+	}
+	@keyframes pulse-green {
+		0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+		70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+		100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+	}
+	@keyframes pulse-amber {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.4; }
+	}
+	@keyframes pulse-blue {
+		0%, 100% { transform: scale(1); }
+		50% { transform: scale(1.4); }
 	}
 
 	.transcript {

@@ -25,6 +25,7 @@ ProtectSystem=strict
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-# /home (read/write nécessaire pour npm cache + .ssh + .config/gh) et /tmp
-# (le clone éphémère) restent normaux. /usr, /etc, /boot deviennent read-only
-# via ProtectSystem=strict.
+# ProtectSystem=strict monte aussi /tmp en read-only par défaut. PrivateTmp=true
+# donne au service son propre namespace /tmp writable et isolé des autres services.
+PrivateTmp=true
+# /home reste read/write par défaut (nécessaire pour npm cache + .ssh + .config/gh).
