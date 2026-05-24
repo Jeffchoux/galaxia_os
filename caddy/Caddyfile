@@ -19,10 +19,33 @@ galaxia-os.com {
 	redir https://app.galaxia-os.com{uri} permanent
 }
 
-# Vhosts à activer une fois les DNS propagés vers 188.34.188.200 :
-# - updates.galaxia-os.com
-# - install.galaxia-os.com
-# - docs.galaxia-os.com
+# Installer public — `curl -fsSL https://install.galaxia-os.com | sudo bash`.
+# Le fichier servi est /var/www/galaxia-install/install.sh, recopié depuis
+# scripts/install.sh par `scripts/sync-www.sh` (sync manuel — voir CLAUDE.md).
+install.galaxia-os.com {
+	encode gzip zstd
+	root * /var/www/galaxia-install
+	@root path /
+	rewrite @root /install.sh
+	file_server
+	header Content-Type "text/x-shellscript; charset=utf-8"
+}
+
+# Endpoint Hub & Spoke — les manifests signés cosign sont publiés ici par
+# `scripts/galaxia-publish.sh` (webroot GALAXIA_WEBROOT=/var/www/galaxia-updates).
+# Tant que la première publication n'a pas eu lieu, /manifests/ renverra 404
+# proprement et le client `galaxia-update.sh` traitera ça comme "rien à faire".
+updates.galaxia-os.com {
+	encode gzip zstd
+	root * /var/www/galaxia-updates
+	file_server
+}
+
+# Documentation — pour l'instant, simple redirection vers le repo public.
+# Quand on aura un vrai site doc (mkdocs/docusaurus), basculer sur file_server.
+docs.galaxia-os.com {
+	redir https://github.com/Jeffchoux/galaxia_os{uri} permanent
+}
 
 # Dashboard NemoClaw — reverse proxy souverain (remplace cloudflared tunnel).
 # Dépendance : `nemoclaw galaxia-main recover` doit avoir posé le port-forward

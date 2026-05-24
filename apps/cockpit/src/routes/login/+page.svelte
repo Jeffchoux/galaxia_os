@@ -1,8 +1,11 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	interface Props {
 		form: { error?: string } | null;
 	}
 	let { form }: Props = $props();
+	let pwInput: HTMLInputElement | undefined = $state();
+	onMount(() => pwInput?.focus());
 </script>
 
 <svelte:head>
@@ -16,7 +19,13 @@
 		<form method="POST">
 			<label>
 				<span>Mot de passe</span>
-				<input type="password" name="password" autocomplete="current-password" autofocus required />
+				<input
+					type="password"
+					name="password"
+					autocomplete="current-password"
+					bind:this={pwInput}
+					required
+				/>
 			</label>
 			{#if form?.error}
 				<p class="error">{form.error}</p>

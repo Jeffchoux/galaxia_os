@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-24** — skill `/run-cockpit` posé sous `apps/cockpit/.claude/skills/` ; browser-smoke cockpit branché en CI (job `cockpit-smoke`). Les 5 étapes de [`PRODUCT-VISION.md`](PRODUCT-VISION.md) §4 sont en V1 (cockpit web, voix in/out + wake word, memory, MCP, cowork V1). Détail dans § *Cockpit* plus bas.
+> Dernière révision : **2026-05-24** (fin journée) — Sprint 1 Q3 lancé (cf. [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md)). Livré : VAD Silero v5 remplace le RMS empirique sur le cockpit avec barge-in propre (PR #5). Coder débloqué (PrivateTmp=true contourne l'EROFS sur `/tmp` ; PR #5). Vhosts Caddy `updates.` / `install.` / `docs.` actifs sur Let's Encrypt après propagation DNS (PR #6). Cockpit 0 warning svelte-check (PR #6).
 
 ## Bootstrap éclair pour un nouvel agent
 
@@ -9,12 +9,13 @@ Si tu viens d'ouvrir une session dans ce repo, lis dans cet ordre (5 min) :
 
 1. [`../BRIEFING.md`](../BRIEFING.md) — ⭐ briefing officiel de Jeff (vision + règles de travail)
 2. **Ce fichier** — état réel des services et du travail à date
-3. [`../CLAUDE.md`](../CLAUDE.md) — conventions techniques, garde-fous, piège mémoire
-4. [`../QUESTIONS_POUR_JEFF.md`](../QUESTIONS_POUR_JEFF.md) — questions business ouvertes
-5. [`STACK.md`](STACK.md) — composition technique (OpenClaw + NemoClaw + Ollama)
-6. [`ARCHITECTURE.md`](ARCHITECTURE.md) — schéma Hub & Spoke
-7. [`UPDATES.md`](UPDATES.md) — mécanisme de release proposé
-8. **Ta mémoire Claude** (voir CLAUDE.md § mémoire — attention au double compte root/galaxia)
+3. [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md) — plan trimestriel (sprints, décisions, anti-patterns)
+4. [`../CLAUDE.md`](../CLAUDE.md) — conventions techniques, garde-fous, piège mémoire
+5. [`../QUESTIONS_POUR_JEFF.md`](../QUESTIONS_POUR_JEFF.md) — questions business ouvertes
+6. [`STACK.md`](STACK.md) — composition technique (OpenClaw + NemoClaw + Ollama)
+7. [`ARCHITECTURE.md`](ARCHITECTURE.md) — schéma Hub & Spoke
+8. [`UPDATES.md`](UPDATES.md) — mécanisme de release proposé
+9. **Ta mémoire Claude** (voir CLAUDE.md § mémoire — attention au double compte root/galaxia)
 
 Tout le reste découle de là.
 
@@ -30,7 +31,7 @@ Tout le reste découle de là.
 | Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
 | fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
 | n8n (legacy)            | stopped     | Arrêté le 2026-05-22 (Jeff ne se souvenait pas de l'usage), volume `n8n_n8n_data` conservé |
-| Cockpit Galaxia         | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db`. Voix (Web Speech) + wake word + VAD + cowork V1 + memory + MCP. |
+| Cockpit Galaxia         | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db`. Voix (Web Speech STT/TTS) + wake word + **VAD Silero v5** (via `@ricky0123/vad-web`, assets copiés par `postinstall` depuis `node_modules`) + barge-in (abort du flux LLM à l'interruption) + cowork V1 + memory + MCP. |
 | Piper TTS daemon        | active      | `galaxia-piper.service` daemon HTTP local FR souverain consommé par `/api/tts` (≈5× plus rapide que spawn shell par requête) |
 | Cockpit dashboard NemoClaw | enabled (inactive — pas rebooté depuis création de l'unit 2026-05-23 08:12) | `galaxia-nemoclaw-dashboard.service` doit restaurer le tunnel SSH `127.0.0.1:18789` au prochain boot ; le tunnel actuel a été démarré à la main et `nemoclaw.galaxia-os.com` répond 200 OK |
 
@@ -38,6 +39,9 @@ Tout le reste découle de là.
 
 - `https://app.galaxia-os.com/` — **Cockpit Galaxia V1** (SvelteKit), login mot de passe, chat Claude streaming, persistance SQLite
 - `https://nemoclaw.galaxia-os.com/` — dashboard NemoClaw (reverse_proxy souverain, token dans le fragment URL)
+- `https://install.galaxia-os.com/` — sert `scripts/install.sh` (text/x-shellscript) pour `curl … | sudo bash`. Re-sync manuel via `sudo bash scripts/sync-www.sh` après toute modif de `install.sh`.
+- `https://updates.galaxia-os.com/` — webroot Hub & Spoke (`/var/www/galaxia-updates`). 404 tant que `scripts/galaxia-publish.sh` n'a pas posé sa première publication (et c'est OK : `galaxia-update.sh` côté fille traite ça comme "rien à faire").
+- `https://docs.galaxia-os.com/` — redirection permanente vers le repo GitHub (en attendant un vrai site doc).
 - `https://galaxia-os.com/` → 301 vers `https://app.galaxia-os.com/`
 
 ## Co-locataires sur OpenJeff (hors repo Galaxia)
@@ -60,11 +64,9 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | @ (apex)      | ✅         | ✅ redirect    |
 | `app.`        | ✅         | ✅ reverse_proxy → cockpit (3001) |
 | `nemoclaw.`   | ✅         | ✅ reverse_proxy → dashboard NemoClaw (18789) |
-| `updates.`    | ❌         | placeholder commenté |
-| `install.`    | ❌         | placeholder commenté |
-| `docs.`       | ❌         | placeholder commenté |
-
-→ Quand `updates.`/`install.`/`docs.` propagent, décommenter dans [`../caddy/Caddyfile`](../caddy/Caddyfile) et `sudo systemctl reload caddy`.
+| `updates.`    | ✅         | ✅ file_server `/var/www/galaxia-updates` (404 jusqu'à 1re publication) |
+| `install.`    | ✅         | ✅ file_server `/var/www/galaxia-install/install.sh` (Content-Type shellscript) |
+| `docs.`       | ✅         | ✅ redir 301 → `https://github.com/Jeffchoux/galaxia_os` |
 
 ## Repo Git
 
@@ -90,7 +92,7 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | ✅  | `scripts/health.sh` — bilan santé une page (console/quiet/json) | Résolu 2026-05-22                                         |
 | ✅  | POC mécanisme d'updates (client + serveur + cosign)      | Résolu 2026-05-22 — `galaxia-update.sh` (fille) + `galaxia-publish.sh` (mère) + CI round-trip |
 | ✅  | `bootstrap_galaxia_dir` + timer `galaxia-update.timer`   | Résolu 2026-05-22 — `install_update_runtime()` pose binaire+units, daemon-reload, enable timer |
-| 1   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
+| ✅  | Brancher `updates.`/`install.`/`docs.` dans Caddy        | Résolu 2026-05-24 — DNS propagés, vhosts actifs, certs LE OK (PR #6) |
 | 2   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
 | 3   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
 | ✅  | E2E install.sh dans container Ubuntu fresh              | Résolu 2026-05-22 — `ops/e2e/Dockerfile` + `run-test.sh`, 22/22 assertions, job CI `install-e2e` |
@@ -101,8 +103,8 @@ Les liens ci-dessus pointent sur des chemins du VPS, pas sur le repo.
 | ✅  | Cowork V1 (étape 5 de PRODUCT-VISION)                   | Résolu 2026-05-23 — upload PDF/Markdown/TXT attaché à la conversation, vision Claude pour photos (JPG/PNG/WEBP/GIF), preview docs joints (modal iframe), onglet Documents + onglet Briefs |
 | ✅  | Browser smoke test cockpit                              | Résolu 2026-05-23 — `ops/browser-smoke/test.mjs` Playwright headless 12 assertions vertes. Branché en CI le 2026-05-24 — job `cockpit-smoke` (boot cockpit stub `SESSION_SECRET`, surface publique seulement) |
 | ✅  | Bot Telegram dans le repo                               | Résolu 2026-05-23 — `agents/telegram/` (était hors repo, désormais versionné)                                                  |
-| 1   | Installation PME pilote (1ère galaxie fille réelle)     | Pré-req tous livrés (Docker packaging, install.sh, wizard, cockpit complet). Bloque sur identification d'une PME pilote (Jeff) |
-| 2   | Brancher `updates.`/`install.`/`docs.` dans Caddy        | DNS OVH (Jeff, Q4)                                              |
+| 1   | Installation PME pilote (1ère galaxie fille réelle)     | Pré-req tous livrés (Docker packaging, install.sh, wizard, cockpit complet). Bloque sur identification d'une PME pilote (cf. décision D2 de la roadmap Q3) |
+| 1   | Coder agent — `gh pr create` échoue depuis systemd (pas de GH_TOKEN dans l'env du service) | Push de branche OK via SSH deploy key, mais la PR n'est jamais créée. Soit poser un PAT scope `repo` dans l'env du service (avec `Environment=GH_TOKEN=…`), soit basculer le coder vers `gh auth login` avec son propre compte technique. Sprint 4. |
 | 3   | Valider option A pour les updates (registry Docker)     | Jeff : 4 questions ouvertes dans Q3 (POC livré, prêt à câbler) |
 | 4   | Q10 — frontière OSS / premium (CLA, licence modules)    | Jeff (pas bloquant court terme)                                  |
 | 5   | Plugin `nemoclaw` du gateway — bug JSON                 | Pas bloquant ; à reporter upstream NVIDIA quand on en a besoin pour une feature (cf. Q9) |

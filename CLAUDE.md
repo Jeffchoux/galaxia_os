@@ -86,6 +86,7 @@ Toujours signer avec `Co-Authored-By: Claude Opus 4.7 ...` quand Claude Code com
 - Source de vérité : `caddy/Caddyfile` du repo
 - Le fichier déployé est `/etc/caddy/Caddyfile` (synchro manuelle pour l'instant)
 - À automatiser plus tard via systemd path unit ou docker
+- Les contenus statiques servis par Caddy (ex : `scripts/install.sh` → `install.galaxia-os.com/`) vivent sous `/var/www/galaxia-*` car Caddy tourne en utilisateur `caddy` qui ne peut pas traverser `/home/galaxia` (mode 750). Re-sync via `sudo bash scripts/sync-www.sh` après toute modif du repo qui touche un fichier servi publiquement.
 
 ### Mémoire & docs
 
