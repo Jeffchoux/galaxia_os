@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-24** (fin journée) — Sprint 1 Q3 lancé (cf. [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md)). Livré : VAD Silero v5 remplace le RMS empirique sur le cockpit avec barge-in propre (PR #5). Coder débloqué (PrivateTmp=true contourne l'EROFS sur `/tmp` ; PR #5). Vhosts Caddy `updates.` / `install.` / `docs.` actifs sur Let's Encrypt après propagation DNS (PR #6). Cockpit 0 warning svelte-check (PR #6).
+> Dernière révision : **2026-05-24** (fin journée) — **Sprint 1 + Sprint 2 Q3 livrés** (cf. [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md)). Le cockpit est désormais multi-user (magic link + admin password), avec scoping `user_id` strict sur toute la DB et cost tracking par appel Anthropic. 7 PRs mergées dans la journée (#5 à #11). D1/D2/D3 ouvertes dans QUESTIONS_POUR_JEFF.md — D2 (PME pilote) bloque la suite de la roadmap (butoir 2026-06-21).
 
 ## Bootstrap éclair pour un nouvel agent
 
@@ -31,13 +31,15 @@ Tout le reste découle de là.
 | Ollama auth proxy       | running     | Sur `172.19.0.1:11435`, pid `~/.nemoclaw/ollama-auth-proxy.pid`                    |
 | fail2ban + UFW          | active      | Ports publics : 22, 80, 443, **5678** + 2 rules scopées 172.19.0.0/16 → 8080/11435 |
 | n8n (legacy)            | stopped     | Arrêté le 2026-05-22 (Jeff ne se souvenait pas de l'usage), volume `n8n_n8n_data` conservé |
-| Cockpit Galaxia         | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db`. Voix (Web Speech STT/TTS) + wake word + **VAD Silero v5** (via `@ricky0123/vad-web`, assets copiés par `postinstall` depuis `node_modules`) + barge-in (abort du flux LLM à l'interruption) + cowork V1 + memory + MCP. |
+| Cockpit Galaxia         | active      | `galaxia-cockpit.service` SvelteKit prod sur `127.0.0.1:3001`, exposé via Caddy sur `app.galaxia-os.com`, DB SQLite `apps/cockpit/data/cockpit.db`. **Multi-user (Sprint 2)** : magic link via mail (provider Brevo ou Console), allow-list silencieuse, password admin secondaire, scoping `user_id` sur toute la DB, cost tracking par appel Anthropic dans table `usage`. Voix Web Speech STT/TTS + wake word + VAD Silero v5 + barge-in + cowork V1 + memory + MCP. |
 | Piper TTS daemon        | active      | `galaxia-piper.service` daemon HTTP local FR souverain consommé par `/api/tts` (≈5× plus rapide que spawn shell par requête) |
 | Cockpit dashboard NemoClaw | enabled (inactive — pas rebooté depuis création de l'unit 2026-05-23 08:12) | `galaxia-nemoclaw-dashboard.service` doit restaurer le tunnel SSH `127.0.0.1:18789` au prochain boot ; le tunnel actuel a été démarré à la main et `nemoclaw.galaxia-os.com` répond 200 OK |
 
 ## Endpoints publics actifs
 
-- `https://app.galaxia-os.com/` — **Cockpit Galaxia V1** (SvelteKit), login mot de passe, chat Claude streaming, persistance SQLite
+- `https://app.galaxia-os.com/` — **Cockpit Galaxia V1** (SvelteKit), login magic link primary + mot de passe admin secondaire, chat Claude streaming, persistance SQLite, cost tracking par user
+- `https://app.galaxia-os.com/login` — page de login (magic link + admin)
+- `https://app.galaxia-os.com/auth/verify?token=…` — consomme un magic link envoyé par mail (single-use, validité 15 min)
 - `https://nemoclaw.galaxia-os.com/` — dashboard NemoClaw (reverse_proxy souverain, token dans le fragment URL)
 - `https://install.galaxia-os.com/` — sert `scripts/install.sh` (text/x-shellscript) pour `curl … | sudo bash`. Re-sync manuel via `sudo bash scripts/sync-www.sh` après toute modif de `install.sh`.
 - `https://updates.galaxia-os.com/` — webroot Hub & Spoke (`/var/www/galaxia-updates`). 404 tant que `scripts/galaxia-publish.sh` n'a pas posé sa première publication (et c'est OK : `galaxia-update.sh` côté fille traite ça comme "rien à faire").

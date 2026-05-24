@@ -8,16 +8,16 @@
 
 ## Calendrier
 
-| Sprint | Semaines  | Thème                                                              | j-h  |
-|--------|-----------|--------------------------------------------------------------------|------|
-| 1      | S22 – S23 | Hygiène & quick wins (6 items)                                     | 6.5  |
-| 2      | S24 – S25 | Multi-user minimum viable (table users + magic link + cost tracking) | 8.5  |
+| Sprint | Semaines  | Thème                                                              | j-h  | État    |
+|--------|-----------|--------------------------------------------------------------------|------|---------|
+| 1      | S22 – S23 | Hygiène & quick wins (6 items)                                     | 6.5  | ✅ livré |
+| 2      | S24 – S25 | Multi-user minimum viable (table users + magic link + cost tracking) | 8.5  | ✅ livré |
 | 3      | S26 – S27 | PME pilote vraie (identification + déploiement + onboarding live + LUKS) | 7.5  |
 | 4      | S28 – S29 | Boucle retour pilote + tests + a11y + anonymisation PII opt-in     | 10.5 |
 | 5      | S30 – S31 | 4 features Claude.ai (Cowork V2 + onglet Code + Pennylane MCP + bouton "Demander à Claude") | 12.5 |
 | 6      | S32 – S33 | Tracker auto features Claude + DNS updates + 2e PME                | 7    |
 
-## Sprint 1 — détail (en cours)
+## Sprint 1 — détail (livré 2026-05-24)
 
 | #   | Item                                                                                       | État        | Référence        |
 |-----|--------------------------------------------------------------------------------------------|-------------|------------------|
@@ -27,6 +27,23 @@
 | 1.4 | Vider les warnings svelte-check cockpit (a11y dialog + autofocus + line-clamp)             | ✅ Livré     | PR #6            |
 | 1.5 | Mettre à jour `docs/STATUS.md` post-Sprint 1                                               | ✅ Livré     | PR #6            |
 | 1.6 | Valider que `galaxia-coder.service` tourne après le fix EROFS                              | ✅ Vérifié   | (clone éphémère OK 2026-05-24 09:08, `coder/2026-05-24-veille-filter-keywords` pushed) |
+
+## Sprint 2 — détail (livré 2026-05-24)
+
+| #   | Item                                                  | État        | Référence |
+|-----|-------------------------------------------------------|-------------|-----------|
+| 2.A | Schema multi-user + migration + user_id scoping       | ✅ Livré    | PR #8     |
+| 2.B | Abstraction mail provider (Brevo + Console)            | ✅ Livré    | PR #9     |
+| 2.C | Endpoints magic link + UI login                       | ✅ Livré    | PR #10    |
+| 2.D | Cost tracking par appel Anthropic                     | ✅ Livré    | PR #11    |
+
+**Décisions tranchées en cours d'implémentation (à valider par Jeff) :**
+- Allow-list silencieuse pour magic link (pas d'enum d'emails par un attaquant).
+- Login UI : email primary, password admin caché derrière toggle "↓ Connexion administrateur".
+- `MAIL_PROVIDER=console` par défaut (sûr en CI et dev). Bascule `brevo` en prod PME quand D1 sera tranchée.
+- Pas encore d'UI admin pour ajouter des users (pour l'instant : SQL direct). À transformer en CLI ou page admin avant le pilote PME.
+
+**Découverte importante (pour D3)** : un message "Bonjour, réponds OK" sous Opus = **$0.174** (11k input tokens du system prompt + memory + tools). Sous Sonnet ce serait ~5× moins. Argument concret pour basculer le default LLM.
 
 Suivi détaillé des sprints suivants dans `docs/STATUS.md` (priorisé) et dans `QUESTIONS_POUR_JEFF.md` (questions ouvertes).
 
