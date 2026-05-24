@@ -19,10 +19,15 @@
 	type Turn = { role: 'user' | 'assistant'; content: string; tools?: ToolEvent[] };
 	type DocChip = { id: string; filename: string; mime_type: string; size: number };
 
+	// L'état conversationnel est mutée localement à chaque turn ; on capture
+	// volontairement l'instantané initial du load, pas une dérivée réactive.
+	// svelte-ignore state_referenced_locally
 	let conversationId = $state<string | null>(data.active?.id ?? null);
+	// svelte-ignore state_referenced_locally
 	let turns = $state<Turn[]>(
 		data.messages.map((m) => ({ role: m.role, content: m.content }))
 	);
+	// svelte-ignore state_referenced_locally
 	let documents = $state<DocChip[]>(
 		data.documents.map((d) => ({
 			id: d.id,
@@ -954,6 +959,7 @@
 			role="dialog"
 			aria-modal="true"
 			aria-label="Aperçu du document {previewDoc.filename}"
+			tabindex="-1"
 		>
 			<header class="preview-head">
 				<span class="preview-icon">{docIcon(previewDoc.mime_type)}</span>

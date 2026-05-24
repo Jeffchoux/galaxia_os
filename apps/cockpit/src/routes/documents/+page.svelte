@@ -116,6 +116,7 @@
 			role="dialog"
 			aria-modal="true"
 			aria-label="Aperçu de {previewDoc.filename}"
+			tabindex="-1"
 		>
 			<header class="preview-head">
 				<span class="preview-icon">{docIcon(previewDoc.mime_type)}</span>
