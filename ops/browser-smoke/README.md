@@ -60,7 +60,17 @@ fait par défaut pour ne pas embarquer de secret dans le repo.
 
 ## CI
 
-Pas branché en CI pour l'instant — le runner GitHub n'a pas le cookie
-session prod et lancer le cockpit local en CI demande de stub la DB.
-Test à lancer à la main après chaque chantier qui touche au login, à
-l'auth gate ou aux routes publiques.
+Branché en CI depuis **2026-05-24** — job `cockpit-smoke` dans
+`.github/workflows/ci.yml`. Il boote le cockpit sur `127.0.0.1:3009`
+avec un `SESSION_SECRET` aléatoire (les autres secrets ne sont pas
+lus pour la surface publique — `ANTHROPIC_API_KEY`/`JEFF_PASS_HASH`
+sont en lazy getters, jamais touchés sans `/api/chat` ou POST
+`/login`), puis lance ce smoke. La DB SQLite est créée dans
+`$RUNNER_TEMP/cockpit-smoke/` (jetable).
+
+Sur échec, le job upload `cockpit.log` + `out/` en artefact `cockpit-smoke-debug`.
+
+Pour les tests authentifiés (chat, voix end-to-end, drag-drop docs),
+toujours pas de chemin CI — il faudrait pré-générer un cookie session
+signé avec le `SESSION_SECRET` du run, ou stub `verifyPassword`. Pas
+fait par défaut, à la main avec un cookie de prod.

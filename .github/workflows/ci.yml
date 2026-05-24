@@ -196,3 +196,73 @@ jobs:
           [ "$(stat -c '%a' "${{ runner.temp }}/galaxia-config/.env")" = "600" ]
           # config must contain the chosen provider
           grep -q '^GALAXIA_LLM_PROVIDER=ollama$' "${{ runner.temp }}/galaxia-config/galaxia.conf"
+
+  cockpit-smoke:
+    name: cockpit — public surface browser smoke (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            apps/cockpit/package-lock.json
+            ops/browser-smoke/package-lock.json
+      - name: Install cockpit deps (native modules — better-sqlite3, argon2)
+        working-directory: apps/cockpit
+        run: npm ci --no-audit --no-fund
+      - name: Build cockpit (adapter-node)
+        working-directory: apps/cockpit
+        run: npm run build
+      - name: Install browser-smoke deps
+        working-directory: ops/browser-smoke
+        run: npm ci --no-audit --no-fund
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          # lockfile pin → cache invalide automatiquement quand on bump playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('ops/browser-smoke/package-lock.json') }}
+      - name: Install Chromium (if cache miss)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: ops/browser-smoke
+        run: npx playwright install chromium
+      - name: Install Chromium system deps (libnss3, libnspr4 etc.)
+        working-directory: ops/browser-smoke
+        run: npx playwright install-deps chromium
+      - name: Boot cockpit (stub env — SESSION_SECRET only, ANTHROPIC_API_KEY non requis pour la surface publique)
+        working-directory: apps/cockpit
+        env:
+          HOST: 127.0.0.1
+          PORT: '3009'
+          ORIGIN: http://127.0.0.1:3009
+          NODE_ENV: production
+          COCKPIT_DB_PATH: ${{ runner.temp }}/cockpit-smoke/cockpit.db
+          COCKPIT_BRIEFS_DIR: ${{ runner.temp }}/cockpit-smoke/briefs
+        run: |
+          mkdir -p "${{ runner.temp }}/cockpit-smoke/briefs"
+          SESSION_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')" \
+            node build > "${{ runner.temp }}/cockpit-smoke/cockpit.log" 2>&1 &
+          echo $! > "${{ runner.temp }}/cockpit-smoke/cockpit.pid"
+          timeout 30 bash -c 'until curl -sf -o /dev/null http://127.0.0.1:3009/login; do sleep 0.5; done'
+      - name: Run browser smoke
+        working-directory: ops/browser-smoke
+        env:
+          BASE_URL: http://127.0.0.1:3009
+        run: node test.mjs
+      - name: Stop cockpit
+        if: always()
+        run: kill "$(cat "${{ runner.temp }}/cockpit-smoke/cockpit.pid")" 2>/dev/null || true
+      - name: Upload cockpit log + screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cockpit-smoke-debug
+          path: |
+            ${{ runner.temp }}/cockpit-smoke/cockpit.log
+            ops/browser-smoke/out
+          if-no-files-found: ignore
+          retention-days: 7
