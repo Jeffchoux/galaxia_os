@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "node build",
     "start": "node build",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "postinstall": "node scripts/copy-vad-assets.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
@@ -17,8 +18,10 @@
     "@modelcontextprotocol/server-filesystem": "^2026.1.14",
     "@modelcontextprotocol/server-github": "^2025.4.8",
     "@node-rs/argon2": "^2.0.2",
+    "@ricky0123/vad-web": "^0.0.30",
     "better-sqlite3": "^11.7.0",
-    "marked": "^18.0.4"
+    "marked": "^18.0.4",
+    "onnxruntime-web": "^1.26.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.11",

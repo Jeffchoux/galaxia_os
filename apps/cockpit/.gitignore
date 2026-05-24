@@ -8,3 +8,6 @@ data/
 *.db
 *.db-journal
 .DS_Store
+
+# Assets VAD copiés par postinstall depuis node_modules (~80MB de WASM + ONNX)
+static/vad/
