@@ -7,7 +7,9 @@ import { ensureMigrated, getUserById } from '$lib/server/db';
 // le service crashe au boot plutôt qu'à la 1re requête utilisateur.
 ensureMigrated();
 
-const PUBLIC_PATHS = new Set(['/login']);
+// /auth/verify est public car c'est la cible des liens magiques envoyés par
+// mail — l'utilisateur arrive sans session, et c'est le handler qui en pose une.
+const PUBLIC_PATHS = new Set(['/login', '/auth/verify']);
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const token = event.cookies.get(SESSION_COOKIE);
