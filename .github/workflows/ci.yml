@@ -178,6 +178,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install argon2 (used by wizard to hash cockpit password)
+        run: sudo apt-get update -qq && sudo apt-get install -y argon2
       - name: Run wizard in non-interactive mode (no API key needed in local mode)
         env:
           GALAXIA_NON_INTERACTIVE: '1'
