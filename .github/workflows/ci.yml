@@ -14,7 +14,7 @@ jobs:
     name: shellcheck (scripts/*.sh, ops/**/*.sh)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run shellcheck
         run: |
           sudo apt-get update -qq
@@ -36,8 +36,8 @@ jobs:
     name: agents/veille tests (offline subset)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
       - name: Run tests (Ollama integration test self-skips when unreachable)
@@ -48,7 +48,7 @@ jobs:
     name: docker compose config (env_file optional, anchor merge)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Validate without wizard-produced files
         env:
           COMPOSE_PROJECT_NAME: galaxia-ci
@@ -73,7 +73,7 @@ jobs:
     name: galaxia-update.sh signed fixture round-trip
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install cosign v2 (air-gapped friendly flow)
         run: |
           curl -sL https://github.com/sigstore/cosign/releases/download/v2.4.3/cosign-linux-amd64 \
@@ -135,7 +135,7 @@ jobs:
     name: scripts/galaxia CLI help + version + unknown
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: galaxia help must list the documented subcommands
         run: |
           out=$(bash scripts/galaxia help)
@@ -167,7 +167,7 @@ jobs:
     name: install.sh E2E in fresh Ubuntu container (test mode)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build E2E image
         run: docker build -f ops/e2e/Dockerfile -t galaxia-e2e:ci .
       - name: Run E2E test
@@ -177,7 +177,7 @@ jobs:
     name: scripts/wizard.sh non-interactive (ollama path)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install argon2 (used by wizard to hash cockpit password)
         run: sudo apt-get update -qq && sudo apt-get install -y argon2
       - name: Run wizard in non-interactive mode (no API key needed in local mode)
@@ -205,8 +205,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -224,7 +224,7 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Cache Playwright browsers
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           # lockfile pin → cache invalide automatiquement quand on bump playwright
@@ -261,7 +261,7 @@ jobs:
         run: kill "$(cat "${{ runner.temp }}/cockpit-smoke/cockpit.pid")" 2>/dev/null || true
       - name: Upload cockpit log + screenshots on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cockpit-smoke-debug
           path: |
