@@ -211,3 +211,61 @@ dans `QUESTIONS_POUR_JEFF.md` § Q1bis.
 **Risque assumé** : la latence STT Whisper sur CPU (~RTF 1.2) ajoute environ +20% de "lag perceptible" vs Web Speech qui est quasi instantané. Pour une conversation Jarvis fluide, on viendra y remettre Kyutai STT ou large-v3 GPU plus tard.
 
 **Ce qui reste vrai de D6** : stack TTS (Pocket TTS Kyutai sur CPU mère, A.2 livré PR #16) inchangée. Le pivot ne concerne **que** le STT serveur. Wake word (Porcupine, A.1 PR #14) inchangé.
+
+---
+
+## 2026-05-25 — D8 : OpenAI Realtime API comme 4ᵉ backend voix (mode non-souverain assumé)
+
+**Posée le :** 2026-05-25 (demande explicite Jeff après test E2E Volet A)
+**Tranchée le :** 2026-05-25 (Jeff : *"je veux avoir l'option d'échanger en cliquant sur cette technologie dans mon cockpit"*)
+
+**Décision** : ajouter au cockpit mère un **4ᵉ choix** dans le cycle `ttsBackend` (Browser → Kyutai → Piper → **Realtime**) qui bascule la voix en mode **speech-to-speech bout-en-bout via OpenAI Realtime API** (`gpt-realtime`, WebRTC client). Quand Realtime est sélectionné, il prend le contrôle complet du flux voix : pas de Claude côté serveur, pas de Whisper, pas de Kyutai TTS — toute la conversation se passe avec GPT-4o-realtime côté OpenAI.
+
+**Pourquoi cette décision** :
+
+- Le 2026-05-25, Jeff a constaté une **latence totale de 12-15 s** par tour de parole en mode cascade CPU (Whisper STT 7s + Claude streaming 3-5s + Kyutai TTS 1s). C'est physiquement le plafond de la cascade CPU.
+- Référence comparative : ChatGPT Advanced Voice Mode (GPT-4o-realtime sur GPU OpenAI, WebRTC bidirectionnel, modèle multimodal speech-to-speech) tourne autour de **300-500 ms** end-to-end. Inatteignable en cascade.
+- Jeff valide assumer la **dépendance non-souveraine + coût pay-per-minute** sur la galaxie mère (son usage perso de dogfooding), en gardant le mode cascade comme défaut et option de repli si OpenAI tombe.
+
+**Architecture côté serveur** :
+
+- Endpoint SvelteKit `POST /api/realtime/session` (auth gate identique au reste du cockpit). Mint un `client_secret` éphémère via `POST https://api.openai.com/v1/realtime/sessions` (durée ~60 s, à usage unique). Renvoie au client : `{ client_secret, model, voice }`.
+- Le system prompt Galaxia (identité, style, mémoire `memory.md`) est **injecté côté serveur** dans le `instructions` field de la session OpenAI — l'identité Galaxia reste préservée, le ton aussi.
+- Variables d'env (`apps/cockpit/src/lib/server/env.ts`) : `OPENAI_API_KEY` (requis pour le mode Realtime, sinon endpoint 503), `OPENAI_REALTIME_MODEL` (défaut `gpt-realtime`), `OPENAI_REALTIME_VOICE` (défaut `alloy`).
+
+**Architecture côté client** :
+
+- Nouvelle lib `$lib/client/realtime.ts` : ouvre une `RTCPeerConnection`, attache le micro local + un `<audio>` distant pour la voix de retour, négocie SDP avec `https://api.openai.com/v1/realtime` en utilisant le `client_secret`.
+- Toggle TTS étendu : `ttsBackend` ∈ `'browser' | 'kyutai' | 'piper' | 'realtime'`, persisté localStorage.
+- Quand `ttsBackend === 'realtime'` : les toggles STT et wake word sont grisés (incompatibles avec le bout-en-bout) ; le bouton voix active la session Realtime au lieu du pipeline cascade.
+- Barge-in natif (l'utilisateur peut couper la voix GPT-4o en parlant) — géré par le serveur OpenAI sans code custom.
+
+**Coût observé (mai 2026, tarif `gpt-realtime`)** :
+
+| Sens | $/M tokens | Tokens/min | $/min |
+|---|---|---|---|
+| Audio input (utilisateur parle, 100 ms = 1 token) | $32 | ~600 | $0.019 |
+| Audio output (Galaxia parle, 50 ms = 1 token) | $64 | ~1200 | $0.077 |
+| **Conversation 1 min (50/50)** | | | **~$0.10** |
+| Avec caching system prompt | | | **~$0.30/min all-in production** |
+
+Pour Jeff en dogfooding (10-30 min/jour) : entre **1 et 10 €/mois**.
+
+**Cost tracking** : événements `response.done` Realtime contiennent `usage` (input_audio_tokens, output_audio_tokens). On les capture côté client et on les POST à `/api/usage/track` qui réutilise la table `usage` existante (modèle = `gpt-realtime`).
+
+**Souveraineté / scope** :
+
+- Mode Realtime **n'est pas activé** sur les filles PME (cockpits installés chez les clients). Il reste dispo en option à activer manuellement dans `.env` PME si une PME le veut, mais ce n'est pas le défaut.
+- La cascade STT→Claude→TTS souveraine reste le défaut et reste la cible "production PME" jusqu'à arrivée d'un GPU mère qui ferait redescendre la latence cascade à ~3-5s (D7 prévoit déjà le swap par env var).
+
+**Risque assumé** :
+
+- Tout le trafic audio passe par OpenAI quand Realtime est actif. Pas pour usage PME.
+- La clé `OPENAI_API_KEY` permet potentiellement d'accéder à d'autres endpoints (chat completions, etc.) — limiter via rate-limit côté OpenAI si la facturation dérape.
+- Le `client_secret` éphémère est valable ~60 s ; pas de partage entre sessions.
+
+**Ce qui ne change pas** :
+
+- Cascade Galaxia complète (Claude + memory.md + tools MCP + Kyutai TTS + Whisper STT) reste le mode par défaut.
+- D7 (Whisper CPU) reste valable, swap GPU futur identique.
+- D6 reste l'orientation stratégique long terme (voix souveraine), D8 n'est qu'un complément optionnel.

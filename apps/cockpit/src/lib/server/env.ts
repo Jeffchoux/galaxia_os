@@ -49,6 +49,16 @@ export const getKyutaiTtsUrl = () =>
 export const getWhisperUrl = () =>
 	env.WHISPER_URL ?? 'http://127.0.0.1:5502';
 
+// OpenAI Realtime API (Sprint 3 § D8, cf. docs/DECISIONS.md). Mode speech-to-
+// speech bout-en-bout. La clé doit avoir l'accès Realtime activé. Si la var
+// est absente, /api/realtime/session renvoie 503 et le client n'expose pas
+// l'option 'realtime' dans le toggle voix.
+export const getOpenAIKey = () => env.OPENAI_API_KEY ?? '';
+export const getOpenAIRealtimeModel = () =>
+	env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime';
+export const getOpenAIRealtimeVoice = () =>
+	env.OPENAI_REALTIME_VOICE ?? 'alloy';
+
 // Mail provider pour les magic links (Sprint 2 PR-B). Default : `console`
 // (log dans journalctl) — safe en dev et CI sans clé Brevo. En prod PME,
 // basculer sur `brevo` une fois BREVO_API_KEY posée et MAIL_FROM validé.

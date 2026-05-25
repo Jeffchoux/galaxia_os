@@ -121,6 +121,41 @@ try {
 		ko('POST /api/tts a servi de l\'audio sans auth', `ct=${ttsType}`);
 	}
 
+	// ─── 4b. /api/realtime/session sans cookie : doit refuser (D8) ───
+	// Le hook auth global redirige les routes protégées vers /login (303).
+	// On désactive le follow-redirect pour vérifier qu'on ne mint PAS de
+	// client_secret (réponse jamais en JSON application/json côté OpenAI).
+	const rtSess = await ctx.request.post(`${BASE}/api/realtime/session`, {
+		failOnStatusCode: false,
+		maxRedirects: 0
+	});
+	const rtSessOk =
+		rtSess.status() === 401 ||
+		rtSess.status() === 303 ||
+		(rtSess.status() >= 300 && rtSess.status() < 400);
+	const rtSessCt = rtSess.headers()['content-type'] ?? '';
+	if (rtSessOk && !rtSessCt.startsWith('application/json')) {
+		ok(`POST /api/realtime/session sans cookie → ${rtSess.status()} (auth gate OK)`);
+	} else {
+		ko('POST /api/realtime/session sans cookie', `status=${rtSess.status()} ct=${rtSessCt}`);
+	}
+
+	// ─── 4c. /api/realtime/usage sans cookie : doit refuser (D8) ───
+	const rtUsage = await ctx.request.post(`${BASE}/api/realtime/usage`, {
+		data: { input_audio_tokens: 0, output_audio_tokens: 0 },
+		failOnStatusCode: false,
+		maxRedirects: 0
+	});
+	const rtUsageOk =
+		rtUsage.status() === 401 ||
+		rtUsage.status() === 303 ||
+		(rtUsage.status() >= 300 && rtUsage.status() < 400);
+	if (rtUsageOk) {
+		ok(`POST /api/realtime/usage sans cookie → ${rtUsage.status()} (auth gate OK)`);
+	} else {
+		ko('POST /api/realtime/usage sans cookie', `status=${rtUsage.status()}`);
+	}
+
 	// ─── 5. Assets statiques ───
 	for (const a of ['/favicon.ico', '/manifest.webmanifest']) {
 		const r = await ctx.request.get(`${BASE}${a}`, { failOnStatusCode: false });

@@ -82,8 +82,11 @@
 	// - 'piper'   : daemon Piper fr_FR-siwis-medium (~2s/phrase, souverain CPU)
 	// - 'kyutai'  : daemon Kyutai Pocket TTS french_24l int8 (RTF≈0.5 sur ce VPS,
 	//               streaming chunked, qualité française nettement supérieure)
+	// - 'realtime' (D8) : OpenAI Realtime API speech-to-speech direct via WebRTC.
+	//   Bypasse Claude/Whisper/Kyutai — c'est une autre identité (GPT-4o vocal)
+	//   à laquelle on injecte les instructions Galaxia côté serveur.
 	// La queue serveur partagée (piperQueue, nom historique) gère piper ET kyutai.
-	let ttsBackend = $state<'browser' | 'piper' | 'kyutai'>('browser');
+	let ttsBackend = $state<'browser' | 'piper' | 'kyutai' | 'realtime'>('browser');
 	let piperQueue: string[] = [];
 	let piperPumpRunning = false;
 	let currentPiperAudio: HTMLAudioElement | null = null;
@@ -96,6 +99,18 @@
 	// segment audio que Silero VAD nous livre via `onSpeechEnd`.
 	let sttBackend = $state<'browser' | 'whisper'>('browser');
 
+	// État de la session OpenAI Realtime (D8). `realtimeHandle` est null tant
+	// qu'aucune session WebRTC n'est ouverte ; il est posé par startRealtime()
+	// et nettoyé par stop(). `realtimeState` reflète la phase de connexion.
+	// `realtimeSpeaking` indique si GPT-4o est en train de parler (au-delà de
+	// l'indicateur global `speaking` qui sert au mode cascade).
+	let realtimeHandle: { stop: () => void } | null = null;
+	let realtimeState = $state<'idle' | 'connecting' | 'connected' | 'closed'>('idle');
+	let realtimeSpeaking = $state(false);
+	let realtimeLastUser = $state<string>('');
+	let realtimeLastAssistant = $state<string>('');
+	let realtimeUsageMicros = $state(0); // cumul approximatif € session courante en micros
+
 	onMount(() => {
 		if (typeof window === 'undefined') return;
 		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -105,7 +120,7 @@
 		try {
 			wakeWord = localStorage.getItem('galaxia.wakeWord') === '1';
 			const tb = localStorage.getItem('galaxia.ttsBackend');
-			if (tb === 'piper' || tb === 'browser' || tb === 'kyutai') ttsBackend = tb;
+			if (tb === 'piper' || tb === 'browser' || tb === 'kyutai' || tb === 'realtime') ttsBackend = tb;
 			const sb = localStorage.getItem('galaxia.sttBackend');
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 		} catch {
@@ -179,6 +194,80 @@
 		} catch {
 			/* idem */
 		}
+	});
+
+	// Pilote la session OpenAI Realtime (D8). On l'ouvre quand l'utilisateur a
+	// choisi le backend 'realtime' ET activé le mode voix, et on la ferme dès
+	// qu'une de ces deux conditions tombe (ou au démontage). Lazy-load de la
+	// lib WebRTC pour ne pas payer son chargement quand le mode n'est pas utilisé.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const shouldRun = ttsBackend === 'realtime' && voiceMode;
+
+		if (!shouldRun) {
+			if (realtimeHandle) {
+				realtimeHandle.stop();
+				realtimeHandle = null;
+			}
+			realtimeSpeaking = false;
+			return;
+		}
+
+		// shouldRun=true et pas encore de session ouverte → on ouvre.
+		if (realtimeHandle) return;
+		let cancelled = false;
+		(async () => {
+			const { startRealtime } = await import('$lib/client/realtime');
+			if (cancelled) return;
+			const handle = await startRealtime({
+				onStateChange: (s) => {
+					realtimeState = s;
+				},
+				onSpeakingChange: (s) => {
+					realtimeSpeaking = s;
+				},
+				onUserTranscript: (t) => {
+					realtimeLastUser = t;
+				},
+				onAssistantTranscript: (t) => {
+					realtimeLastAssistant = t;
+				},
+				onUsage: (u) => {
+					// Best-effort : on POST au backend pour persister dans la table usage.
+					// Si l'endpoint n'existe pas ou échoue, on garde quand même le compteur
+					// local de session pour informer Jeff.
+					fetch('/api/realtime/usage', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify(u)
+					})
+						.then((r) => (r.ok ? r.json() : null))
+						.then((j: { cost_micros?: number } | null) => {
+							if (j?.cost_micros) realtimeUsageMicros += j.cost_micros;
+						})
+						.catch(() => {
+							/* persistance best-effort */
+						});
+				},
+				onError: (e) => {
+					errorMsg = `Realtime: ${e.message}`;
+					ttsBackend = 'browser';
+				}
+			});
+			if (cancelled) {
+				handle?.stop();
+				return;
+			}
+			realtimeHandle = handle;
+		})();
+
+		return () => {
+			cancelled = true;
+			if (realtimeHandle) {
+				realtimeHandle.stop();
+				realtimeHandle = null;
+			}
+		};
 	});
 
 	function toggleWakeWord() {
@@ -832,6 +921,10 @@
 	function toggleVoiceMode() {
 		voiceMode = !voiceMode;
 		if (voiceMode) {
+			// En mode Realtime (D8), c'est l'effet dédié plus bas qui ouvre la
+			// session WebRTC vers OpenAI — on ne démarre PAS le pipeline cascade
+			// (VAD + Web Speech + Whisper), GPT-4o gère tout en interne.
+			if (ttsBackend === 'realtime') return;
 			// Hands-free : on démarre l'analyser (VAD) + on lance l'écoute tout de suite
 			startAudioMonitor();
 			if (!listening && !sending) {
@@ -923,35 +1016,44 @@
 				{/if}
 				<button
 					class="voice-toggle"
-					class:on={ttsBackend === 'piper' || ttsBackend === 'kyutai'}
+					class:on={ttsBackend !== 'browser'}
 					onclick={() => {
-						// Cycle browser → kyutai → piper → browser
+						// Cycle browser → kyutai → piper → realtime → browser
 						ttsBackend =
 							ttsBackend === 'browser'
 								? 'kyutai'
 								: ttsBackend === 'kyutai'
 									? 'piper'
-									: 'browser';
+									: ttsBackend === 'piper'
+										? 'realtime'
+										: 'browser';
 					}}
 					title={ttsBackend === 'kyutai'
 						? 'Voix Kyutai Pocket TTS (français_24l, souverain CPU, qualité ChatGPT, ~2× temps réel) — clic pour Piper'
 						: ttsBackend === 'piper'
-							? 'Voix Piper local (souverain, ~2s/phrase, qualité simple) — clic pour revenir au navigateur'
-							: 'Voix navigateur native (instant, mais transcrit côté Google chez Chrome) — clic pour Kyutai souverain'}
+							? 'Voix Piper local (souverain, ~2s/phrase, qualité simple) — clic pour OpenAI Realtime'
+							: ttsBackend === 'realtime'
+								? 'Mode OpenAI Realtime (GPT-4o speech-to-speech, ~500ms, ~0.10€/min, non-souverain) — clic pour revenir au navigateur'
+								: 'Voix navigateur native (instant, mais transcrit côté Google chez Chrome) — clic pour Kyutai souverain'}
 				>
 					{ttsBackend === 'kyutai'
 						? '✨ Kyutai'
 						: ttsBackend === 'piper'
 							? '🎵 Piper'
-							: '🔉 Browser'}
+							: ttsBackend === 'realtime'
+								? '⚡ Realtime'
+								: '🔉 Browser'}
 				</button>
 				<button
 					class="voice-toggle"
 					class:on={sttBackend === 'whisper'}
 					onclick={() => (sttBackend = sttBackend === 'whisper' ? 'browser' : 'whisper')}
-					title={sttBackend === 'whisper'
-						? 'STT Whisper local (souverain, RTF~1.2 CPU, qualité française forte) — clic pour Web Speech navigateur'
-						: 'STT Web Speech (instant mais transcrit côté Google chez Chrome) — clic pour Whisper local souverain'}
+					disabled={ttsBackend === 'realtime'}
+					title={ttsBackend === 'realtime'
+						? 'STT inutile en mode ⚡ Realtime — GPT-4o gère la transcription en interne'
+						: sttBackend === 'whisper'
+							? 'STT Whisper local (souverain, RTF~1.2 CPU, qualité française forte) — clic pour Web Speech navigateur'
+							: 'STT Web Speech (instant mais transcrit côté Google chez Chrome) — clic pour Whisper local souverain'}
 				>
 					{sttBackend === 'whisper' ? '🎤 Whisper' : '🎙 Web'}
 				</button>
@@ -960,12 +1062,14 @@
 					class:on={wakeWord}
 					class:flash={wakeFlash}
 					onclick={toggleWakeWord}
-					disabled={!voiceSupported.stt}
-					title={voiceSupported.stt
-						? wakeWord
-							? "Wake word actif — il faut commencer ton message par 'Galaxia' ou 'Hey Galaxia'"
-							: 'Activer le wake word — seules les phrases commençant par Galaxia déclenchent l\'envoi'
-						: 'Reconnaissance vocale non supportée par ce navigateur'}
+					disabled={!voiceSupported.stt || ttsBackend === 'realtime'}
+					title={ttsBackend === 'realtime'
+						? 'Wake word inutile en mode ⚡ Realtime — la session est ouverte en continu tant que Voix est actif'
+						: voiceSupported.stt
+							? wakeWord
+								? "Wake word actif — il faut commencer ton message par 'Galaxia' ou 'Hey Galaxia'"
+								: 'Activer le wake word — seules les phrases commençant par Galaxia déclenchent l\'envoi'
+							: 'Reconnaissance vocale non supportée par ce navigateur'}
 				>
 					{wakeWord ? '👂 Wake on' : '👂 Wake'}
 				</button>
@@ -973,15 +1077,27 @@
 					class="voice-toggle"
 					class:on={voiceMode}
 					onclick={toggleVoiceMode}
-					disabled={!voiceSupported.tts}
-					title={voiceSupported.tts
+					disabled={!voiceSupported.tts && ttsBackend !== 'realtime'}
+					title={ttsBackend === 'realtime'
 						? voiceMode
-							? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
-							: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
-						: 'TTS non supporté par ce navigateur'}
+							? 'Session Realtime ouverte — parle, GPT-4o écoute en continu (clic pour fermer)'
+							: 'Activer pour ouvrir la session WebRTC vers OpenAI Realtime'
+						: voiceSupported.tts
+							? voiceMode
+								? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
+								: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
+							: 'TTS non supporté par ce navigateur'}
 				>
 					{#if voiceMode}
-						{vadActive ? '🎙️ Mains libres' : '🔊 Voix'}
+						{ttsBackend === 'realtime'
+							? realtimeSpeaking
+								? '🔊 Galaxia parle'
+								: realtimeState === 'connecting'
+									? '⏳ Connexion…'
+									: '🎙️ Realtime ON'
+							: vadActive
+								? '🎙️ Mains libres'
+								: '🔊 Voix'}
 					{:else}
 						🔇 Voix
 					{/if}
@@ -990,10 +1106,44 @@
 		</header>
 
 		<section class="transcript" bind:this={scrollEl}>
+			{#if ttsBackend === 'realtime'}
+				<div class="realtime-banner" class:speaking={realtimeSpeaking}>
+					<div class="realtime-banner-title">
+						⚡ Mode Realtime OpenAI {realtimeState === 'connecting'
+							? '— connexion…'
+							: realtimeState === 'connected'
+								? voiceMode
+									? realtimeSpeaking
+										? '— Galaxia parle'
+										: '— à l\'écoute'
+									: '— en pause (active 🎙️ Mains libres)'
+								: realtimeState === 'closed'
+									? '— session fermée'
+									: ''}
+					</div>
+					{#if realtimeLastUser || realtimeLastAssistant}
+						<div class="realtime-transcripts">
+							{#if realtimeLastUser}
+								<div class="rt-line rt-user"><b>Jeff :</b> {realtimeLastUser}</div>
+							{/if}
+							{#if realtimeLastAssistant}
+								<div class="rt-line rt-assistant"><b>Galaxia :</b> {realtimeLastAssistant}</div>
+							{/if}
+						</div>
+					{/if}
+					{#if realtimeUsageMicros > 0}
+						<div class="realtime-cost">
+							Session : ~{(realtimeUsageMicros / 1_000_000).toFixed(3)} $ cumulés (non-souverain)
+						</div>
+					{/if}
+				</div>
+			{/if}
 			{#if turns.length === 0}
 				<div class="welcome">
 					<p>
-						{#if voiceMode}
+						{#if ttsBackend === 'realtime'}
+							Mode ⚡ Realtime — active <b>🎙️ Mains libres</b> et parle directement à GPT-4o.
+						{:else if voiceMode}
 							Clique sur 🎤 et parle.
 						{:else}
 							Pose ta question. Réponse en streaming.
@@ -1505,6 +1655,47 @@
 		place-items: center;
 		min-height: 200px;
 		color: #5a5a76;
+	}
+	.realtime-banner {
+		background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(59, 130, 246, 0.12));
+		border: 1px solid rgba(124, 58, 237, 0.35);
+		border-radius: 12px;
+		padding: 0.85rem 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		max-width: 800px;
+		width: 100%;
+		align-self: center;
+	}
+	.realtime-banner.speaking {
+		border-color: rgba(124, 58, 237, 0.8);
+		box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4);
+		animation: rt-pulse 1.6s ease-in-out infinite;
+	}
+	@keyframes rt-pulse {
+		0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+		50% { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0); }
+	}
+	.realtime-banner-title {
+		font-weight: 600;
+		font-size: 0.95rem;
+		color: #c4b5fd;
+	}
+	.realtime-transcripts {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		font-size: 0.92rem;
+		color: #e5e7eb;
+	}
+	.rt-line b {
+		opacity: 0.7;
+		margin-right: 0.3rem;
+	}
+	.realtime-cost {
+		font-size: 0.8rem;
+		color: #94a3b8;
 	}
 	.turn {
 		display: flex;
