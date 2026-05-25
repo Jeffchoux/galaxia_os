@@ -61,8 +61,27 @@ const SUMMARIZE_THRESHOLD = 20;
 // Au-delà de ce seuil de tokens d'historique, idem (heuristique : ~4 chars/token).
 const SUMMARIZE_CHAR_THRESHOLD = 32_000;
 
+// Sans cette injection, Claude répond à "quelle est la date ?" avec sa date
+// d'entraînement (hallucination courante). On calcule à chaque appel pour rester
+// juste même après plusieurs jours de cache de prompt.
+function buildDateLine(now: Date = new Date()): string {
+	const date = now.toLocaleDateString('fr-FR', {
+		weekday: 'long',
+		day: 'numeric',
+		month: 'long',
+		year: 'numeric',
+		timeZone: 'Europe/Paris'
+	});
+	const time = now.toLocaleTimeString('fr-FR', {
+		hour: '2-digit',
+		minute: '2-digit',
+		timeZone: 'Europe/Paris'
+	});
+	return `Date et heure actuelles côté serveur (Europe/Paris) : ${date}, ${time}. Réfère-toi à cette date plutôt qu'à ta date d'entraînement quand Jeff te demande "on est quel jour" ou raisonne sur des échéances.`;
+}
+
 export function buildSystemPrompt(conversation: Conversation | null): string {
-	const parts = [BASE_SYSTEM];
+	const parts = [BASE_SYSTEM, buildDateLine()];
 	const memory = loadMemory();
 	if (memory) {
 		parts.push(`---\n\nMémoire persistante (édite via le fichier memory.md sur le serveur) :\n\n${memory}`);
