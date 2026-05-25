@@ -128,3 +128,51 @@ dans `QUESTIONS_POUR_JEFF.md` § Q1bis.
 - Permet à une future UI web Galaxia d'écrire les mêmes fichiers via le même contrat
 
 **Conventions UI tirées du test** : toute UI dans une fonction dont le `$(...)` est capturé doit aller à `>&2`, sinon la valeur retournée contient le banner. Voir `section()` et les `cat >&2 <<EXPLAIN` dans `wizard.sh`.
+
+---
+
+## 2026-05-25 — D6 : pivoter Sprint 3 vers Voix Jarvis + TikTok temps réel + Arbo Dropbox
+
+**Posée le :** 2026-05-25
+**Tranchée le :** 2026-05-25
+
+**Décision** : combo **(d) + (a)**.
+
+- **(a)** Amender la roadmap Q3 : **Sprint 3 = Voix Jarvis (A) + TikTok temps réel (C) + Arbo Dropbox (B)** (ordre A→C→B). PME pilote repoussée en Sprint 4. L'hypothèse critique "1 PME signée Q3" est assumée comme glissée à Q3-Q4.
+- **(d)** Mode déploiement : **dogfooding galaxie mère seulement** dans un premier temps. Les filles PME tournent au minimum requis (Pocket TTS CPU, pas de GPU exigé) — règle du Hub & Spoke : la mère porte les coûts d'expérimentation.
+
+**Conséquences immédiates dans la roadmap** :
+- D4 (refonte cockpit V2) : passe de NO-GO à **GO conditionnel mère-only** pour les volets A+B
+- D5 (voix Pipecat/Whisper Q3) : passe de NON à **OUI mère-only**, Q4 = roll-out filles PME une fois PME pilote signée et stack stabilisée
+- Anti-patterns #1 (refonte big-bang cockpit) et #8 (voix premium Q3) : neutralisés pour Sprint 3 — la justification (commande directe du commanditaire après lecture des 4 options) figure ici. Restent valables pour les sprints suivants.
+
+**Choix techniques validés en chat le 25/05** (sous-questions du plan voix) :
+- **GPU** : galaxie mère oui (Hetzner GPU dédié, ~€200/mois), filles PME = CPU/Pocket TTS
+- **Ordre des volets Sprint 3** : A (Voix) → C (TikTok temps réel) → B (Arbo)
+
+**Stack voix retenue** (sur la base de la recherche état de l'art mai 2026) :
+
+| Brique | Choix | Justification |
+|---|---|---|
+| Wake word browser | **Picovoice Porcupine WASM** (custom "Hey Galaxia") | Standard 2026, intégration ~3 lignes, FR supporté ; mode dogfooding-mère = tier perso suffit |
+| STT streaming FR | **Kyutai STT 1B en_fr** (open-source, France) | Latence ~500ms, conçu agents, souveraineté ✅ |
+| TTS FR (galaxie mère) | **Kyutai TTS 1.6B** GPU | TTFA 220ms, qualité française nettement supérieure à Piper |
+| TTS FR (filles PME) | **Kyutai Pocket TTS** (CPU 100M params) | Tourne sur VPS sans GPU, FR supporté depuis avril 2026 |
+| Full-duplex | Cascade STT→Claude→TTS (pas Moshi) | Moshi pas prêt prod (score adhérence instructions 1,26/5) ; cascade reste plus fiable mai 2026 |
+| Orchestration éventuelle | Pipecat (BSD-2) en option de repli | Self-host pur, swap STT/TTS faciles ; non requis V1 |
+
+**Plan Sprint 3 chiffré** :
+
+| Volet | Description | Effort | Cible |
+|---|---|---|---|
+| A.1 | Porcupine WASM (wake word "Hey Galaxia") dans `+page.svelte` | 1 j | mère |
+| A.2 | Daemon Kyutai TTS (port 5501), basculement transparent depuis `/api/tts` (3ᵉ option à côté de browser/piper) | 2 j | mère (GPU) |
+| A.3 | Daemon Kyutai STT serveur + WebSocket partial transcripts, fallback Web Speech | 2 j | mère (GPU) |
+| C.1 | Bot Telegram → décodage immédiat TikTok à la réception (Whisper + Claude) au lieu d'inbox.md | 1 j | mère |
+| C.2 | ACK Telegram enrichi (brief + bouton lien profond cockpit vers conv vocale pré-chargée) | 1 j | mère |
+| B.1 | Migration SQLite : table `folders`, colonnes `folder_id` sur conversations + documents | 1,5 j | mère + filles |
+| B.2 | Composant `FolderTree.svelte` sidebar (drag-drop natif HTML5) + routes `/folders/[id]` | 2,5 j | mère + filles |
+
+**Total : 11 j-h** (capa nominale Sprint 3 = 7,5 j-h → débord d'un sprint, donc Sprint 3 + début Sprint 4. La PME pilote glisse à mi-Sprint 4 / Sprint 5).
+
+**Risque assumé** : si une opportunité PME apparaît à court terme (butoir D2 = 2026-06-21), arbitrage à refaire à ce moment — la voix Jarvis devient alors un argument vendeur mais le déploiement reste à finaliser.
