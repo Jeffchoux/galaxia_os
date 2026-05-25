@@ -69,6 +69,14 @@
 	let wakeFlash = $state(false); // mini feedback visuel quand le wake est détecté
 	const WAKE_RE = /^\s*(hey\s+|hé\s+|eh\s+|ok\s+|salut\s+)?galaxia[\s,.!?:;]*(.*)$/i;
 
+	// Wake word acoustique Porcupine (Sprint 3 § A.1, cf. docs/DECISIONS.md § D6).
+	// Si `PUBLIC_PICOVOICE_ACCESS_KEY` est défini ET `/wake/hey_galaxia_fr.ppn`
+	// + `/wake/porcupine_params_fr.pv` présents, on remplace le filtre regex
+	// par une détection acoustique always-on qui démarre la STT à la volée.
+	// Sinon : retombée silencieuse sur le mode regex existant — pas de régression.
+	let porcupineHandle: { destroy: () => Promise<void> } | null = null;
+	let porcupineActive = $state(false); // true quand le worker WASM tourne
+
 	// Backend TTS : 'browser' (instant, voix native, Google Cloud côté Chrome)
 	// ou 'piper' (~2s latence par phrase, voix locale fr_FR-siwis, souverain).
 	let ttsBackend = $state<'browser' | 'piper'>('browser');
@@ -89,6 +97,62 @@
 		} catch {
 			/* localStorage indispo */
 		}
+
+		return () => {
+			// cleanup quand le composant est démonté (HMR, navigation)
+			porcupineHandle?.destroy().catch(() => {});
+			porcupineHandle = null;
+			porcupineActive = false;
+		};
+	});
+
+	// Démarre/arrête le détecteur acoustique Porcupine selon l'état `wakeWord`.
+	// Le worker mic Picovoice tourne en parallèle de la SpeechRecognition —
+	// quand "Hey Galaxia" est détecté acoustiquement, on déclenche flashWake
+	// + lance la STT pour capter la phrase qui suit.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+
+		const key = (import.meta.env.PUBLIC_PICOVOICE_ACCESS_KEY as string | undefined) ?? '';
+		if (!wakeWord || !key) {
+			if (porcupineHandle) {
+				porcupineHandle.destroy().catch(() => {});
+				porcupineHandle = null;
+				porcupineActive = false;
+			}
+			return;
+		}
+
+		// Activation paresseuse : on charge le module seulement si la clé est là
+		let cancelled = false;
+		(async () => {
+			const { initPorcupine } = await import('$lib/client/porcupine');
+			if (cancelled) return;
+			const handle = await initPorcupine(
+				{
+					accessKey: key,
+					keywordPath: '/wake/hey_galaxia_fr.ppn',
+					keywordLabel: 'Hey Galaxia',
+				},
+				() => {
+					// Déclenché à chaque détection acoustique
+					flashWake();
+					if (!listening && !speaking) {
+						toggleListening();
+					}
+				},
+			);
+			if (cancelled) {
+				await handle?.destroy().catch(() => {});
+				return;
+			}
+			porcupineHandle = handle;
+			porcupineActive = handle !== null;
+		})();
+
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	$effect(() => {
@@ -131,8 +195,8 @@
 			}
 			if (interimTranscript) interim = interimTranscript;
 			if (finalTranscript) {
-				if (wakeWord) {
-					// Filtre : on n'accepte que ce qui suit "(Hey) Galaxia"
+				if (wakeWord && !porcupineActive) {
+					// Mode regex : on n'accepte que ce qui suit "(Hey) Galaxia"
 					const m = finalTranscript.match(WAKE_RE);
 					if (m) {
 						const stripped = (m[2] ?? '').trim();
@@ -141,6 +205,7 @@
 					}
 					// Si pas de match, on ignore — la voix qui ne s'adresse pas à Galaxia est filtrée
 				} else {
+					// Mode Porcupine (gating acoustique déjà fait amont) OU wake désactivé
 					draft = (draft + ' ' + finalTranscript).trim();
 				}
 				interim = '';
