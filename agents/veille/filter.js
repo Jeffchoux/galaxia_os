@@ -3,6 +3,7 @@ export const DEFAULT_KEYWORDS = [
   'sécurité ia', 'security ai', 'ai security', 'souveraineté', 'sovereign',
   'on-premise', 'on premise', 'self-host', 'sandbox', 'guardrail',
   'small language model', 'slm', 'fine-tun', 'quantization', 'inference',
+  'deepseek',
 ];
 
 export function filterItems(items, { keywords = DEFAULT_KEYWORDS, minScore = 1 } = {}) {
