@@ -121,6 +121,28 @@ try {
 		ko('POST /api/tts a servi de l\'audio sans auth', `ct=${ttsType}`);
 	}
 
+	// ─── 4b. /api/realtime/session sans cookie : doit refuser (D8) ───
+	const rtSess = await ctx.request.post(`${BASE}/api/realtime/session`, {
+		failOnStatusCode: false
+	});
+	if (rtSess.status() === 401) {
+		ok('POST /api/realtime/session sans cookie → 401 (auth gate OK)');
+	} else {
+		const body = await rtSess.text().catch(() => '');
+		ko('POST /api/realtime/session sans cookie', `status=${rtSess.status()} body=${body.slice(0, 120)}`);
+	}
+
+	// ─── 4c. /api/realtime/usage sans cookie : doit refuser (D8) ───
+	const rtUsage = await ctx.request.post(`${BASE}/api/realtime/usage`, {
+		data: { input_audio_tokens: 0, output_audio_tokens: 0 },
+		failOnStatusCode: false
+	});
+	if (rtUsage.status() === 401) {
+		ok('POST /api/realtime/usage sans cookie → 401 (auth gate OK)');
+	} else {
+		ko('POST /api/realtime/usage sans cookie', `status=${rtUsage.status()}`);
+	}
+
 	// ─── 5. Assets statiques ───
 	for (const a of ['/favicon.ico', '/manifest.webmanifest']) {
 		const r = await ctx.request.get(`${BASE}${a}`, { failOnStatusCode: false });

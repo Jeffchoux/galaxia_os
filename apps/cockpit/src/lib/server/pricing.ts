@@ -70,3 +70,25 @@ export function computeCostMicros(model: string, u: TokenUsage): number {
 		cacheRead * p.input * p.cache_read_multiplier;
 	return Math.round(total);
 }
+
+// OpenAI Realtime API (D8). Tarifs mai 2026 publiés par OpenAI :
+// - audio  input  : $32 / M tokens
+// - audio  output : $64 / M tokens
+// - text   input  : $5  / M tokens (système prompt + transcripts)
+// - text   output : $20 / M tokens (texte généré, rare en mode vocal)
+// L'usage des `response.done` Realtime expose ces 4 catégories séparément.
+export interface RealtimeTokenUsage {
+	input_audio_tokens: number;
+	output_audio_tokens: number;
+	input_text_tokens: number;
+	output_text_tokens: number;
+}
+
+export function computeRealtimeCostMicros(u: RealtimeTokenUsage): number {
+	return Math.round(
+		u.input_audio_tokens * 32 +
+			u.output_audio_tokens * 64 +
+			u.input_text_tokens * 5 +
+			u.output_text_tokens * 20
+	);
+}
