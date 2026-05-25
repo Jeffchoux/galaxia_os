@@ -2,7 +2,8 @@
 //
 // Ce que ça couvre :
 //   - root redirige vers /login (auth gate)
-//   - la page /login render correctement (title, h1, input password, submit)
+//   - la page /login render correctement (title, h1, input email primary,
+//     toggle admin qui révèle l'input password)
 //   - routes protégées (/documents, /briefs, /api/conversations) renvoient au login
 //   - /api/tts répond (et exige bien l'auth quand le cookie est absent)
 //   - assets statiques (favicon, manifest) sont servis
@@ -66,18 +67,38 @@ try {
 	await page.screenshot({ path: `${OUT}/01-login.png`, fullPage: true });
 
 	// ─── 2. Login page render OK ───
+	// Depuis Sprint 2, le formulaire primaire est le magic link (email).
+	// Le password admin est caché derrière un toggle "↓ Connexion administrateur".
 	const title = await page.title();
 	const h1 = await page.locator('h1').first().textContent().catch(() => null);
-	const hasPwField = (await page.locator('input[type=password]').count()) > 0;
+	const hasEmailField = (await page.locator('input[type=email]').count()) > 0;
 	const hasSubmit = (await page.locator('button[type=submit]').count()) > 0;
+	const adminToggle = page.locator('button.toggle');
+	const hasAdminToggle = (await adminToggle.count()) > 0;
 	if (title.includes('Galaxia')) ok('Login title contient "Galaxia"', title);
 	else ko('Login title', `got "${title}"`);
 	if (h1 && h1.includes('Galaxia')) ok('Login h1 contient "Galaxia"', h1);
 	else ko('Login h1', `got "${h1}"`);
-	if (hasPwField) ok('Champ <input type=password> présent');
-	else ko('Champ password absent');
-	if (hasSubmit) ok('Bouton <button type=submit> présent');
+	if (hasEmailField) ok('Champ <input type=email> (magic link) présent');
+	else ko('Champ email absent');
+	if (hasSubmit) ok('Bouton <button type=submit> présent (magic link form)');
 	else ko('Bouton submit absent');
+	if (hasAdminToggle) ok('Toggle "↓ Connexion administrateur" présent');
+	else ko('Toggle admin absent');
+
+	// Le password doit être caché par défaut, révélé après clic sur le toggle
+	const pwCountBefore = await page.locator('input[type=password]').count();
+	if (pwCountBefore === 0) ok('Champ password caché par défaut (auth primaire = magic link)');
+	else ko('Champ password visible sans clic sur toggle', `count=${pwCountBefore}`);
+
+	if (hasAdminToggle) {
+		await adminToggle.click();
+		// Attend que l'input password apparaisse (Svelte5 réactivité quasi instantanée)
+		await page.locator('input[type=password]').first().waitFor({ state: 'visible', timeout: 2000 }).catch(() => {});
+		const pwCountAfter = await page.locator('input[type=password]').count();
+		if (pwCountAfter > 0) ok('Champ password révélé après clic sur toggle admin');
+		else ko('Champ password absent après clic sur toggle', `count=${pwCountAfter}`);
+	}
 
 	// ─── 3. Routes protégées renvoient au login ───
 	const guarded = ['/documents', '/briefs', '/api/conversations'];
