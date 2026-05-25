@@ -48,7 +48,7 @@ const POSITIVE_KEYWORDS = [
   "wizard", "pme", "sme", "docker", "compose", "caddy", "nemoclaw", "openclaw",
   "cosign", "signed update", "security", "cve", "ai safety", "guardrail",
   "self-host", "on-premise", "souverain", "fine-tun", "huggingface", "claude",
-  "anthropic",
+  "anthropic", "llm", "deepseek",
 ];
 
 function today() {
