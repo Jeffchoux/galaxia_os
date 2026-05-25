@@ -1,0 +1,36 @@
+[Unit]
+Description=Galaxia — Whisper STT daemon (FastAPI + faster-whisper large-v3-turbo int8)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/agents/whisper
+# Mêmes deps que galaxia-kyutai-tts (torch + faster-whisper partagés) →
+# venv tts-venv réutilisé pour économiser ~5 Go.
+Environment=GALAXIA_STT_MODEL=large-v3-turbo
+Environment=GALAXIA_STT_DEVICE=cpu
+Environment=GALAXIA_STT_COMPUTE=int8
+Environment=GALAXIA_STT_LANG=fr
+ExecStart=/home/galaxia/.claude/galaxia/tts-venv/bin/uvicorn server:app \
+    --host 127.0.0.1 \
+    --port 5502 \
+    --log-level info
+Restart=on-failure
+RestartSec=10
+# Premier démarrage = download large-v3-turbo (~1,5 Go) depuis HF Hub.
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/galaxia/.cache /tmp
+
+[Install]
+WantedBy=multi-user.target
