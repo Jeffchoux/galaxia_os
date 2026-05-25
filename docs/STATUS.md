@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-24** (fin journée) — **Sprint 1 + Sprint 2 Q3 livrés** (cf. [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md)). Le cockpit est désormais multi-user (magic link + admin password), avec scoping `user_id` strict sur toute la DB et cost tracking par appel Anthropic. 7 PRs mergées dans la journée (#5 à #11). D1/D2/D3 ouvertes dans QUESTIONS_POUR_JEFF.md — D2 (PME pilote) bloque la suite de la roadmap (butoir 2026-06-21).
+> Dernière révision : **2026-05-25** — **Sprint 3 pivoté** (D6 tranchée par Jeff) : thème = Voix Jarvis + TikTok temps réel + Arbo Dropbox, dogfooding galaxie mère uniquement. PME pilote glisse à Sprint 4. Détail dans [`DECISIONS.md`](DECISIONS.md) § D6 et plan chiffré dans [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md) § Sprint 3. Stack voix retenue : Picovoice Porcupine WASM + Kyutai STT/TTS (GPU mère) + cascade STT→Claude→TTS. D1/D2/D3 toujours ouvertes ; D2 (PME pilote) butoir 2026-06-21 désormais purement informatif (déplacement assumé Q3→Q3-Q4).
 
 ## Bootstrap éclair pour un nouvel agent
 

@@ -199,3 +199,59 @@ Aujourd'hui le cockpit utilise `claude-opus-4-7` par défaut (`COCKPIT_MODEL` su
 **Ma reco (cf. ROADMAP Q3 D3) :** **(b)** — Sonnet par défaut, 3 boutons visibles (Local / Sonnet / Opus). C'est aussi cohérent avec l'anti-pattern roadmap n°7 : "max 3 LLM providers visibles dans l'UI".
 
 **Impact si pas tranché :** j'avance Sprint 2 multi-user en gardant Opus par défaut comme aujourd'hui, et je rajoute le sélecteur en Sprint 4 (boucle retour pilote). Donc on peut décider plus tard, mais avant d'ouvrir au-delà de toi.
+
+---
+
+## D6. ~~Pivoter Sprint 3 vers "Voix Jarvis + Arbo Dropbox + TikTok temps réel" ?~~ (tranchée 2026-05-25 → cf. `docs/DECISIONS.md`)
+
+**Posée le :** 2026-05-25
+**Tranchée le :** 2026-05-25 — combo **(d) + (a)** : mère-only en dogfooding + amendement roadmap Sprint 3 pivot Voix+TikTok+Arbo. Détails dans `docs/DECISIONS.md`.
+
+<details>
+<summary>Contenu original du bloc (archivé pour traçabilité)</summary>
+
+**Statut :** ouverte — **bloquante**, conflit explicite avec roadmap formelle
+
+**Contexte.** Le 25/05 dans le chat, tu m'as demandé de pousser le cockpit vers :
+- Conversation vocale qualité ChatGPT Advanced Voice Mode 2026 (wake word "Hey Galaxia" → Jarvis)
+- Arborescence type Dropbox (dossiers / sous-dossiers / fichiers)
+- TikTok décrypté immédiatement à l'arrivée + dialogue vocal avec Galaxia pour décider de l'intégration
+
+Tu as aussi répondu à 2 sous-questions dans le chat : **GPU sur galaxie mère seulement** (filles PME = CPU/Pocket TTS), **ordre A→C→B** (Voix → TikTok → Arbo).
+
+**Conflit avec la roadmap formelle Q3.** Avant d'écrire la moindre ligne de code, j'ai relu `ROADMAP-Q3-2026.md` et le plan viole **4 règles que tu as toi-même posées** :
+
+| Règle | Énoncé | Source |
+|---|---|---|
+| D4 | "Refonte cockpit V2 — NO-GO — aucun trigger objectif atteint (0 PME)" | ROADMAP § 5 décisions |
+| D5 | "Voix Pipecat/Whisper Q3 ? **NON**, garder V1 Web Speech — replan Q4" | ROADMAP § 5 décisions |
+| Anti-pattern #1 | "Refonte big-bang cockpit (sans trigger objectif)" | ROADMAP § anti-patterns |
+| Anti-pattern #8 | "Voix premium pendant Q3" | ROADMAP § anti-patterns |
+
+Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + onboarding live + LUKS), pas voix. Avec D2 toujours bloquante (butoir 2026-06-21 pour identifier la PME).
+
+**Pourquoi ces règles existaient (rappel).** Tu les as posées pour éviter de brûler 3 semaines de dev sur du polish technique pendant que tu n'as toujours pas de PME pilote en main. Le risque réel : livrer une voix splendide à toi tout seul (= dogfooding, OK) mais retarder l'objectif business "1ʳᵉ PME signée Q3".
+
+**Plan voix (rappel, pour décider en connaissance de cause).**
+- **Volet A — Voix Jarvis (~5j)** : Porcupine WASM (wake "Hey Galaxia") + Kyutai STT 1B FR streaming + Kyutai TTS 1.6B (galaxie mère, GPU) / Pocket TTS CPU (filles PME)
+- **Volet C — TikTok temps réel (~2j)** : Whisper + Claude déclenchés à la réception Telegram, ACK enrichi avec lien profond vers conv vocale
+- **Volet B — Arbo Dropbox (~4j)** : tables `folders` + `folder_id` sur conversations/documents + composant `FolderTree.svelte` drag-drop
+- **Total ≈ 11 j-h** dev (Sprint 3 capa = 7,5 j-h prévus initialement)
+
+**Options.**
+
+- **(a) Amender la roadmap : Sprint 3 = Voix+TikTok+Arbo, repousser PME pilote en Sprint 4.** Cohérent avec ton souhait du jour. **Mais** : on déplace la deadline PME (butoir D2 = 2026-06-21) → assume officiellement de prendre du retard sur l'hypothèse critique "1 PME pilote signée Q3". Effort estimé 11 j-h > capa Sprint 3 (7,5 j-h) → en réalité Sprint 3 ET 4 mangés par cette refonte. **Sprints 5-6 décalent aussi.**
+
+- **(b) Garder roadmap : Sprint 3 = PME pilote, voix reportée Q4.** Discipline. Si une PME pilote signe, la voix Jarvis devient un argument *vendeur* en Q4 avec un vrai feedback utilisateur. **Mais** : tu restes frustré sur ton ask central, et le TikTok continue d'attendre 24h pour être traité.
+
+- **(c) Compromis — faire UNIQUEMENT le Volet C (TikTok temps réel, ~2j) dans Sprint 3, voix+arbo reportés Q4.** Le TikTok temps réel n'enfreint AUCUNE règle (pas une refonte cockpit, pas de voix premium, pas de dépendance SaaS). C'est un fix de pipeline existant. Gain immédiat, zéro dérive. Voix et arbo replanifiés Q4 avec retour pilote.
+
+- **(d) Voie hybride dogfooding-only — Volet A léger sur galaxie mère uniquement, sans toucher au déploiement PME.** Tu testes la voix Jarvis pour ton usage perso, ça nourrit la roadmap Q4, mais on ne déploie rien sur les filles PME tant que la pilote n'est pas signée. Réduit l'effort à ~3j (Porcupine + swap Piper→Kyutai côté serveur mère, pas de refonte UI majeure). Le risque "refonte big-bang" reste maîtrisé car on touche peu de fichiers.
+
+**Ma reco :** **(c) pour Q3** + **(d) à 50% en sandbox pendant Sprint 4-5 quand la PME pilote est briefée**, **(a) en Sprint Q4** une fois la pilote signée. Raison : tes propres règles existent pour une raison business (la PME signe avant tout). Le TikTok temps réel est gagnant-gagnant et zéro-risque. La voix Jarvis mérite d'être faite proprement, pas dans la précipitation, et **avec un utilisateur PME pour valider** (sinon tu construis pour toi-même).
+
+**Si tu réponds (a) ou (d)** : je mets à jour `ROADMAP-Q3-2026.md` (suppression D4/D5, neutralisation anti-patterns #1/#8 pour ce sprint), je documente la décision dans `DECISIONS.md`, et je démarre. Sinon je fais (c) cette semaine et on en reparle après le 21/06.
+
+**Impact si pas tranché :** je fais (c) par défaut (TikTok temps réel) — c'est la seule branche qui ne viole rien et qui te donne un gain immédiat. La voix attend ta validation explicite.
+
+</details>
