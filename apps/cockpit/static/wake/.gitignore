@@ -1,0 +1,5 @@
+# Modèles Porcupine (binaires fournis par Picovoice Console)
+# Ne pas commit — accès lié au compte Jeff (free tier perso) et chaque PME
+# devra entraîner le sien si on extrait la voix Jarvis vers les filles plus tard.
+*.ppn
+porcupine_params*.pv
