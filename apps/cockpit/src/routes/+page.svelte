@@ -77,9 +77,13 @@
 	let porcupineHandle: { destroy: () => Promise<void> } | null = null;
 	let porcupineActive = $state(false); // true quand le worker WASM tourne
 
-	// Backend TTS : 'browser' (instant, voix native, Google Cloud côté Chrome)
-	// ou 'piper' (~2s latence par phrase, voix locale fr_FR-siwis, souverain).
-	let ttsBackend = $state<'browser' | 'piper'>('browser');
+	// Backend TTS :
+	// - 'browser' : SpeechSynthesis natif (instant, voix Google côté Chrome)
+	// - 'piper'   : daemon Piper fr_FR-siwis-medium (~2s/phrase, souverain CPU)
+	// - 'kyutai'  : daemon Kyutai Pocket TTS french_24l int8 (RTF≈0.5 sur ce VPS,
+	//               streaming chunked, qualité française nettement supérieure)
+	// La queue serveur partagée (piperQueue, nom historique) gère piper ET kyutai.
+	let ttsBackend = $state<'browser' | 'piper' | 'kyutai'>('browser');
 	let piperQueue: string[] = [];
 	let piperPumpRunning = false;
 	let currentPiperAudio: HTMLAudioElement | null = null;
@@ -93,7 +97,7 @@
 		try {
 			wakeWord = localStorage.getItem('galaxia.wakeWord') === '1';
 			const tb = localStorage.getItem('galaxia.ttsBackend');
-			if (tb === 'piper' || tb === 'browser') ttsBackend = tb;
+			if (tb === 'piper' || tb === 'browser' || tb === 'kyutai') ttsBackend = tb;
 		} catch {
 			/* localStorage indispo */
 		}
@@ -290,7 +294,7 @@
 	function speakChunk(rawText: string) {
 		const text = stripMarkdownForSpeech(rawText);
 		if (!voiceMode || !text.trim()) return;
-		if (ttsBackend === 'piper') {
+		if (ttsBackend === 'piper' || ttsBackend === 'kyutai') {
 			piperQueue.push(text);
 			void pumpPiperQueue();
 			return;
@@ -325,19 +329,24 @@
 		speaking = true;
 		speakingSinceMs = Date.now();
 		try {
-			while (piperQueue.length > 0 && ttsBackend === 'piper' && voiceMode) {
+			while (
+				piperQueue.length > 0 &&
+				(ttsBackend === 'piper' || ttsBackend === 'kyutai') &&
+				voiceMode
+			) {
 				const text = piperQueue.shift()!;
 				try {
 					const res = await fetch('/api/tts', {
 						method: 'POST',
 						headers: { 'content-type': 'application/json' },
-						body: JSON.stringify({ text })
+						body: JSON.stringify({ text, backend: ttsBackend })
 					});
 					if (!res.ok) {
-						// Piper down → fallback transparent vers TTS browser
+						// Backend serveur down → fallback transparent vers TTS browser
 						if (res.status === 503) {
+							const downName = ttsBackend === 'kyutai' ? 'Kyutai' : 'Piper';
 							ttsBackend = 'browser';
-							errorMsg = 'Piper non disponible — bascule sur la voix navigateur.';
+							errorMsg = `${downName} non disponible — bascule sur la voix navigateur.`;
 						}
 						continue;
 					}
@@ -821,13 +830,27 @@
 				{/if}
 				<button
 					class="voice-toggle"
-					class:on={ttsBackend === 'piper'}
-					onclick={() => (ttsBackend = ttsBackend === 'piper' ? 'browser' : 'piper')}
-					title={ttsBackend === 'piper'
-						? 'Voix Piper local (souverain, ~2s latence/phrase) — clic pour repasser au navigateur'
-						: 'Voix navigateur native (instant, mais transcrit côté Google chez Chrome). Clic pour Piper local.'}
+					class:on={ttsBackend === 'piper' || ttsBackend === 'kyutai'}
+					onclick={() => {
+						// Cycle browser → kyutai → piper → browser
+						ttsBackend =
+							ttsBackend === 'browser'
+								? 'kyutai'
+								: ttsBackend === 'kyutai'
+									? 'piper'
+									: 'browser';
+					}}
+					title={ttsBackend === 'kyutai'
+						? 'Voix Kyutai Pocket TTS (français_24l, souverain CPU, qualité ChatGPT, ~2× temps réel) — clic pour Piper'
+						: ttsBackend === 'piper'
+							? 'Voix Piper local (souverain, ~2s/phrase, qualité simple) — clic pour revenir au navigateur'
+							: 'Voix navigateur native (instant, mais transcrit côté Google chez Chrome) — clic pour Kyutai souverain'}
 				>
-					{ttsBackend === 'piper' ? '🎵 Piper' : '🔉 Browser'}
+					{ttsBackend === 'kyutai'
+						? '✨ Kyutai'
+						: ttsBackend === 'piper'
+							? '🎵 Piper'
+							: '🔉 Browser'}
 				</button>
 				<button
 					class="voice-toggle"
