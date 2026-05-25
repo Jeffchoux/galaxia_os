@@ -1077,15 +1077,27 @@
 					class="voice-toggle"
 					class:on={voiceMode}
 					onclick={toggleVoiceMode}
-					disabled={!voiceSupported.tts}
-					title={voiceSupported.tts
+					disabled={!voiceSupported.tts && ttsBackend !== 'realtime'}
+					title={ttsBackend === 'realtime'
 						? voiceMode
-							? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
-							: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
-						: 'TTS non supporté par ce navigateur'}
+							? 'Session Realtime ouverte — parle, GPT-4o écoute en continu (clic pour fermer)'
+							: 'Activer pour ouvrir la session WebRTC vers OpenAI Realtime'
+						: voiceSupported.tts
+							? voiceMode
+								? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
+								: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
+							: 'TTS non supporté par ce navigateur'}
 				>
 					{#if voiceMode}
-						{vadActive ? '🎙️ Mains libres' : '🔊 Voix'}
+						{ttsBackend === 'realtime'
+							? realtimeSpeaking
+								? '🔊 Galaxia parle'
+								: realtimeState === 'connecting'
+									? '⏳ Connexion…'
+									: '🎙️ Realtime ON'
+							: vadActive
+								? '🎙️ Mains libres'
+								: '🔊 Voix'}
 					{:else}
 						🔇 Voix
 					{/if}

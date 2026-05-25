@@ -92,8 +92,11 @@ export async function startRealtime(
 	const offer = await pc.createOffer();
 	await pc.setLocalDescription(offer);
 
+	// GA API depuis mai 2026 : l'endpoint d'établissement WebRTC est
+	// /v1/realtime/calls (l'ancien /v1/realtime renvoie "Beta API no longer
+	// supported"). Pas de header OpenAI-Beta non plus.
 	const sdpRes = await fetch(
-		`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
+		`https://api.openai.com/v1/realtime/calls?model=${encodeURIComponent(model)}`,
 		{
 			method: 'POST',
 			headers: {
