@@ -88,6 +88,14 @@
 	let piperPumpRunning = false;
 	let currentPiperAudio: HTMLAudioElement | null = null;
 
+	// Backend STT (Sprint 3 § A.3) :
+	// - 'browser' : SpeechRecognition natif (instant, transcript via Google côté Chrome)
+	// - 'whisper' : daemon Whisper local (galaxia-whisper.service, faster-whisper
+	//               large-v3-turbo int8 sur CPU, souverain, RTF≈1.2 turn-based).
+	// En mode 'whisper' on n'utilise PAS Web Speech ; la transcription part du
+	// segment audio que Silero VAD nous livre via `onSpeechEnd`.
+	let sttBackend = $state<'browser' | 'whisper'>('browser');
+
 	onMount(() => {
 		if (typeof window === 'undefined') return;
 		const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -98,6 +106,8 @@
 			wakeWord = localStorage.getItem('galaxia.wakeWord') === '1';
 			const tb = localStorage.getItem('galaxia.ttsBackend');
 			if (tb === 'piper' || tb === 'browser' || tb === 'kyutai') ttsBackend = tb;
+			const sb = localStorage.getItem('galaxia.sttBackend');
+			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 		} catch {
 			/* localStorage indispo */
 		}
@@ -164,6 +174,7 @@
 			if (typeof window !== 'undefined') {
 				localStorage.setItem('galaxia.wakeWord', wakeWord ? '1' : '0');
 				localStorage.setItem('galaxia.ttsBackend', ttsBackend);
+				localStorage.setItem('galaxia.sttBackend', sttBackend);
 			}
 		} catch {
 			/* idem */
@@ -241,18 +252,26 @@
 
 	function toggleListening() {
 		if (listening) {
-			recognition?.stop();
+			if (sttBackend === 'browser') recognition?.stop();
+			else listening = false; // mode Whisper : on coupe juste l'UI, le VAD continue
+			return;
+		}
+		stopSpeaking();
+		errorMsg = null;
+		listening = true;
+		if (sttBackend === 'whisper') {
+			// Le VAD Silero, déjà démarré par startAudioMonitor(), nous livrera
+			// le segment audio via onSpeechEnd → postSpeechToWhisper.
+			// On s'assure juste que le monitor tourne.
+			void startAudioMonitor();
 			return;
 		}
 		const r = getRecognition();
 		if (!r) {
+			listening = false;
 			errorMsg = "Reconnaissance vocale non disponible (Chrome / Edge / Safari requis).";
 			return;
 		}
-		// Interrompre la voix de Galaxia si elle parle (pour pouvoir lui couper la parole)
-		stopSpeaking();
-		errorMsg = null;
-		listening = true;
 		try {
 			r.start();
 		} catch (e) {
@@ -418,9 +437,13 @@
 						if (!listening && !sending) toggleListening();
 					}
 				},
-				onSpeechEnd: () => {
-					// Géré ailleurs (SpeechRecognition.onend dans Web Speech).
-					// Réservé pour la V2 (faster-whisper côté serveur).
+				onSpeechEnd: (audio: Float32Array) => {
+					// En mode STT Whisper : on encode le segment audio Silero (PCM 16 kHz
+					// mono Float32) en WAV et on POST à `/api/stt` (Sprint 3 § A.3).
+					// En mode 'browser', Web Speech a déjà tout fait via `r.onend`.
+					if (sttBackend === 'whisper' && audio && audio.length > 800) {
+						void postSpeechToWhisper(audio);
+					}
 				}
 			});
 			await micVad.start?.();
@@ -428,6 +451,76 @@
 		} catch (e) {
 			errorMsg = "VAD Silero indisponible — fallback désactivé. " + (e instanceof Error ? e.message : '');
 			vadActive = false;
+		}
+	}
+
+	// Encode un Float32Array PCM 16 kHz mono en blob WAV 16-bit signé.
+	// Pas de dépendance externe — header 44 octets + samples int16 little-endian.
+	function float32ToWavBlob(samples: Float32Array, sampleRate = 16000): Blob {
+		const bytesPerSample = 2;
+		const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+		const view = new DataView(buffer);
+		const writeStr = (offset: number, s: string) => {
+			for (let i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+		};
+		writeStr(0, 'RIFF');
+		view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+		writeStr(8, 'WAVE');
+		writeStr(12, 'fmt ');
+		view.setUint32(16, 16, true); // PCM chunk size
+		view.setUint16(20, 1, true); // PCM format
+		view.setUint16(22, 1, true); // mono
+		view.setUint32(24, sampleRate, true);
+		view.setUint32(28, sampleRate * bytesPerSample, true);
+		view.setUint16(32, bytesPerSample, true);
+		view.setUint16(34, 16, true);
+		writeStr(36, 'data');
+		view.setUint32(40, samples.length * bytesPerSample, true);
+		let offset = 44;
+		for (let i = 0; i < samples.length; i++, offset += bytesPerSample) {
+			const s = Math.max(-1, Math.min(1, samples[i]));
+			view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+		}
+		return new Blob([buffer], { type: 'audio/wav' });
+	}
+
+	async function postSpeechToWhisper(samples: Float32Array): Promise<void> {
+		// Ne transcrit pas pendant que Galaxia parle / pendant qu'on envoie déjà
+		// un tour LLM — éviter les superpositions chaotiques.
+		if (speaking || sending) return;
+		const blob = float32ToWavBlob(samples, 16000);
+		const form = new FormData();
+		form.set('audio', blob, 'speech.wav');
+		form.set('language', 'fr');
+		try {
+			const res = await fetch('/api/stt', { method: 'POST', body: form });
+			if (!res.ok) {
+				if (res.status === 503) {
+					sttBackend = 'browser';
+					errorMsg = 'Whisper non disponible — bascule sur Web Speech.';
+				}
+				return;
+			}
+			const { text } = (await res.json()) as { text?: string };
+			const cleaned = (text ?? '').trim();
+			if (!cleaned) return;
+
+			// Mêmes règles que Web Speech : si wake-word actif (et Porcupine
+			// pas en charge), on filtre les phrases qui ne commencent pas par Galaxia.
+			if (wakeWord && !porcupineActive) {
+				const m = cleaned.match(WAKE_RE);
+				if (!m) return;
+				const stripped = (m[2] ?? '').trim();
+				flashWake();
+				draft = (draft + ' ' + stripped).trim();
+			} else {
+				draft = (draft + ' ' + cleaned).trim();
+			}
+			if (voiceMode && draft.trim() && !sending && !speaking) {
+				void send();
+			}
+		} catch (e) {
+			errorMsg = e instanceof Error ? e.message : String(e);
 		}
 	}
 
@@ -851,6 +944,16 @@
 						: ttsBackend === 'piper'
 							? '🎵 Piper'
 							: '🔉 Browser'}
+				</button>
+				<button
+					class="voice-toggle"
+					class:on={sttBackend === 'whisper'}
+					onclick={() => (sttBackend = sttBackend === 'whisper' ? 'browser' : 'whisper')}
+					title={sttBackend === 'whisper'
+						? 'STT Whisper local (souverain, RTF~1.2 CPU, qualité française forte) — clic pour Web Speech navigateur'
+						: 'STT Web Speech (instant mais transcrit côté Google chez Chrome) — clic pour Whisper local souverain'}
+				>
+					{sttBackend === 'whisper' ? '🎤 Whisper' : '🎙 Web'}
 				</button>
 				<button
 					class="voice-toggle"

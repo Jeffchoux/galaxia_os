@@ -176,3 +176,38 @@ dans `QUESTIONS_POUR_JEFF.md` § Q1bis.
 **Total : 11 j-h** (capa nominale Sprint 3 = 7,5 j-h → débord d'un sprint, donc Sprint 3 + début Sprint 4. La PME pilote glisse à mi-Sprint 4 / Sprint 5).
 
 **Risque assumé** : si une opportunité PME apparaît à court terme (butoir D2 = 2026-06-21), arbitrage à refaire à ce moment — la voix Jarvis devient alors un argument vendeur mais le déploiement reste à finaliser.
+
+---
+
+## 2026-05-25 — D7 : STT serveur — faster-whisper au lieu de Kyutai STT (sur CPU)
+
+**Posée le :** 2026-05-25 (en cours d'implémentation Sprint 3 § A.3)
+**Tranchée le :** 2026-05-25 (autonomie technique, Jeff non bloquant)
+
+**Décision** : pour le Sprint 3 § A.3, **remplacer Kyutai STT 1B en_fr (prévu en D6) par faster-whisper + large-v3-turbo int8** comme STT serveur. Endpoint POST `/api/stt` proxy un daemon FastAPI local (`galaxia-whisper.service`, port 5502). Si daemon down → 503 → client retombe sur Web Speech navigateur.
+
+**Pourquoi cette déviation par rapport à D6** :
+
+- Le plus petit modèle Kyutai STT publié mai 2026 = `stt-1b-en_fr` (1 milliard de paramètres), pensé GPU H100/L40S — aucune variante < 1B documentée, aucun benchmark CPU officiel.
+- Ce VPS galaxie mère n'a **pas de GPU réel** (Virtio uniquement). Le procurement Hetzner GPU dédié validé en D6 n'est pas encore concrétisé.
+- faster-whisper + large-v3-turbo int8 sur 8 vCPU : **RTF ≈ 1.21** mesuré sur ce VPS pour un échantillon FR de 5s (= 6s de transcription pour 5s de parole). Turn-based viable, qualité française correcte.
+- Le distill EN-only (`distil-large-v3`) catastrophique en FR (test reproduit) → écarté.
+- `medium` (RTF 0.86) plus rapide mais qualité légèrement inférieure → réservé à un éventuel mode "économe" plus tard.
+
+**Architecture du remplaçant (pour swap futur sans toucher au cockpit)** :
+
+- Daemon FastAPI exposant `POST /transcribe` multipart (`audio`, `language`) → JSON `{text, language, duration, latency_s}`.
+- Variables d'env du service : `GALAXIA_STT_MODEL`, `GALAXIA_STT_DEVICE`, `GALAXIA_STT_COMPUTE`, `GALAXIA_STT_LANG`.
+- Quand le GPU mère arrive : changer `GALAXIA_STT_MODEL=large-v3` (ou autre) + `GALAXIA_STT_DEVICE=cuda` + `GALAXIA_STT_COMPUTE=float16` dans le service. Zéro changement cockpit.
+- venv `tts-venv` partagé avec galaxia-kyutai-tts.service (torch + ctranslate2 + tokenizers en commun) → ~5 Go économisés.
+
+**Côté client (cockpit)** :
+
+- Nouvelle option `sttBackend = 'whisper'` à côté de `'browser'` (toggle 🎤 Whisper / 🎙 Web).
+- Silero VAD déjà en place fournit `onSpeechEnd(audio: Float32Array)` (PCM 16 kHz mono) → encodé WAV inline (44 octets header + int16 LE) → POST `/api/stt`.
+- Wake-word regex / Porcupine respectés (même filtre côté Whisper que côté Web Speech).
+- Voice mode hands-free : auto-send après transcription, identique au mode Web Speech.
+
+**Risque assumé** : la latence STT Whisper sur CPU (~RTF 1.2) ajoute environ +20% de "lag perceptible" vs Web Speech qui est quasi instantané. Pour une conversation Jarvis fluide, on viendra y remettre Kyutai STT ou large-v3 GPU plus tard.
+
+**Ce qui reste vrai de D6** : stack TTS (Pocket TTS Kyutai sur CPU mère, A.2 livré PR #16) inchangée. Le pivot ne concerne **que** le STT serveur. Wake word (Porcupine, A.1 PR #14) inchangé.

@@ -41,6 +41,14 @@ export const getPiperModel = () =>
 export const getKyutaiTtsUrl = () =>
 	env.KYUTAI_TTS_URL ?? 'http://127.0.0.1:5501';
 
+// Whisper STT (Sprint 3 § A.3, cf. docs/DECISIONS.md § D7).
+// Daemon FastAPI (galaxia-whisper.service) qui tourne faster-whisper
+// large-v3-turbo en int8 sur CPU. Endpoint `${URL}/transcribe` multipart.
+// Si la var est vide ou le daemon down, /api/stt renvoie 503 → le client
+// retombe sur Web Speech (SpeechRecognition natif navigateur).
+export const getWhisperUrl = () =>
+	env.WHISPER_URL ?? 'http://127.0.0.1:5502';
+
 // Mail provider pour les magic links (Sprint 2 PR-B). Default : `console`
 // (log dans journalctl) — safe en dev et CI sans clé Brevo. En prod PME,
 // basculer sur `brevo` une fois BREVO_API_KEY posée et MAIL_FROM validé.
