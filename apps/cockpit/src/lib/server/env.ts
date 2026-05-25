@@ -31,6 +31,16 @@ export const getPiperBin = () =>
 export const getPiperModel = () =>
 	env.PIPER_MODEL ?? '/opt/galaxia/piper-voices/fr_FR-siwis-medium.onnx';
 
+// Kyutai Pocket TTS (Sprint 3 § A.2, cf. docs/DECISIONS.md § D6).
+// Daemon FastAPI lancé via galaxia-kyutai-tts.service. Modèle `french_24l`
+// quantifié int8 → ~2× plus rapide que temps réel sur ce VPS CPU-only,
+// streaming chunked WAV. Si la var n'est pas définie ou le daemon down,
+// /api/tts retombe transparent sur Piper.
+//
+// L'URL pointe sur la racine ; l'endpoint est `${URL}/tts` (POST multipart).
+export const getKyutaiTtsUrl = () =>
+	env.KYUTAI_TTS_URL ?? 'http://127.0.0.1:5501';
+
 // Mail provider pour les magic links (Sprint 2 PR-B). Default : `console`
 // (log dans journalctl) — safe en dev et CI sans clé Brevo. En prod PME,
 // basculer sur `brevo` une fois BREVO_API_KEY posée et MAIL_FROM validé.

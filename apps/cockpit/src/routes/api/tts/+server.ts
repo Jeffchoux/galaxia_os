@@ -4,11 +4,17 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getPiperBin, getPiperDaemonUrl, getPiperModel } from '$lib/server/env';
+import {
+	getKyutaiTtsUrl,
+	getPiperBin,
+	getPiperDaemonUrl,
+	getPiperModel
+} from '$lib/server/env';
 
 const MAX_TEXT = 2000;
+type Backend = 'piper' | 'kyutai';
 
-async function synthesizeViaDaemon(text: string): Promise<Buffer | null> {
+async function synthesizeViaPiperDaemon(text: string): Promise<Buffer | null> {
 	const url = getPiperDaemonUrl();
 	try {
 		const res = await fetch(url, {
@@ -17,8 +23,22 @@ async function synthesizeViaDaemon(text: string): Promise<Buffer | null> {
 			body: JSON.stringify({ text })
 		});
 		if (!res.ok) return null;
-		const buf = Buffer.from(await res.arrayBuffer());
-		return buf;
+		return Buffer.from(await res.arrayBuffer());
+	} catch {
+		return null;
+	}
+}
+
+async function synthesizeViaKyutai(text: string): Promise<Buffer | null> {
+	// Pocket TTS expose POST /tts en multipart/form-data — fetch construit
+	// le bon Content-Type avec boundary tout seul depuis le FormData.
+	const url = `${getKyutaiTtsUrl().replace(/\/$/, '')}/tts`;
+	const form = new FormData();
+	form.set('text', text);
+	try {
+		const res = await fetch(url, { method: 'POST', body: form });
+		if (!res.ok) return null;
+		return Buffer.from(await res.arrayBuffer());
 	} catch {
 		return null;
 	}
@@ -56,15 +76,26 @@ async function synthesizeViaSpawn(text: string): Promise<Buffer> {
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
 
-	const body = (await request.json()) as { text?: string };
+	const body = (await request.json()) as { text?: string; backend?: Backend };
 	const text = (body.text ?? '').trim();
+	const requestedBackend: Backend = body.backend === 'kyutai' ? 'kyutai' : 'piper';
 	if (!text) throw error(400, 'empty text');
 	if (text.length > MAX_TEXT) throw error(400, 'text too long');
 
-	// 1. Daemon HTTP (rapide, modèle pré-chargé) → ~200-500ms/phrase
-	// 2. Fallback spawn (lent mais sans dépendance) → ~2s/phrase
-	// 3. Si rien ne marche → 503, le client retombe sur le TTS browser
-	let audio = await synthesizeViaDaemon(text);
+	// Cascade : on tente le backend demandé, puis on retombe sur Piper, puis
+	// sur le spawn local. Si tout échoue, 503 → le client repasse en TTS browser.
+	//
+	// - kyutai : daemon Pocket TTS port 5501, modèle french_24l int8, streaming
+	//   chunked → RTF ≈ 0.5 sur ce VPS CPU (~2× plus rapide que temps réel)
+	// - piper  : daemon HTTP port 5500, voix fr_FR-siwis-medium → ~200-500ms/phrase
+	// - spawn  : binaire piper en CLI (fallback de secours) → ~2s/phrase
+	let audio: Buffer | null = null;
+	if (requestedBackend === 'kyutai') {
+		audio = await synthesizeViaKyutai(text);
+	}
+	if (!audio) {
+		audio = await synthesizeViaPiperDaemon(text);
+	}
 	if (!audio) {
 		audio = await synthesizeViaSpawn(text);
 	}

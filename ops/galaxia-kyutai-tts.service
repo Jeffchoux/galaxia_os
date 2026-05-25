@@ -1,0 +1,39 @@
+[Unit]
+Description=Galaxia — Kyutai Pocket TTS daemon (HTTP server, modèle french_24l quantisé int8)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/.claude/galaxia
+# Pocket TTS expose un endpoint FastAPI POST /tts (multipart) qui renvoie un
+# audio/wav en streaming chunked. Lancé dans un venv dédié (tts-venv) pour
+# isoler les ~5 Go de dépendances Torch + CUDA non-utilisées (CPU only ici).
+#
+# Mode dogfooding-mère (cf. docs/DECISIONS.md § D6) — modèle french_24l + int8
+# pour rentrer à l'aise en RAM sur ce VPS sans GPU. RTF mesuré ≈ 0.5
+# (= ~2× plus rapide que temps réel) en streaming chunked.
+ExecStart=/home/galaxia/.claude/galaxia/tts-venv/bin/pocket-tts serve \
+    --host 127.0.0.1 \
+    --port 5501 \
+    --language french_24l \
+    --quantize
+Restart=on-failure
+RestartSec=10
+# Premier démarrage = download du modèle (HF Hub). Suite = quasi instantané.
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+
+# Hardening (même shape que galaxia-piper.service)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+# Cache HF Hub + venv en read-write pour les téléchargements modèle au boot
+ReadWritePaths=/home/galaxia/.cache /home/galaxia/.claude/galaxia/tts-venv /tmp
+
+[Install]
+WantedBy=multi-user.target
