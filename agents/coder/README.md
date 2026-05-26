@@ -21,7 +21,7 @@ The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:
 ## Prerequisites on the host
 
 - `ANTHROPIC_API_KEY` exported (the wizard writes it to `/opt/galaxia/config/.env`; the systemd unit sources that file).
-- `gh` CLI authenticated on the host, **or** `GH_TOKEN` env var set (auto-passed through by systemd).
+- `GH_TOKEN` set in `/opt/galaxia/config/.env` with `repo` scope (PAT GitHub classique ou fine-grained `contents: write` + `pull_requests: write`). Sans cette variable, `gh pr create` échoue silencieusement depuis le service systemd (l'env de l'utilisateur `galaxia` n'est pas hérité par les services oneshot).
 - Git configured with SSH access to `Jeffchoux/galaxia_os` (true on OpenJeff via the existing deploy key).
 - The day's veille report exists at `/home/galaxia/galaxia-project/docs/veille/<today>.md` (the `galaxia-veille.timer` writes it at 06:30 UTC).
 
@@ -61,6 +61,7 @@ All optional unless noted.
 | Variable                          | Default                                              | Effect                                                                                          |
 |-----------------------------------|------------------------------------------------------|-------------------------------------------------------------------------------------------------|
 | `ANTHROPIC_API_KEY`               | (required)                                           | API auth.                                                                                       |
+| `GH_TOKEN`                        | (required pour `gh pr create`)                       | PAT GitHub scope `repo` (ou fine-grained `contents: write` + `pull_requests: write`). À poser dans `/opt/galaxia/config/.env` — les services systemd oneshot n'héritent pas de l'env shell de l'utilisateur. |
 | `GALAXIA_CODER_MODEL`             | `claude-sonnet-4-6`                                  | Override to `claude-opus-4-7` if you want higher-quality PRs at ~5x the cost.                  |
 | `GALAXIA_CODER_DRY_RUN`           | `0`                                                  | `1` = skip `git push` and `gh pr create`. Still produce a `<report>`.                          |
 | `GALAXIA_CODER_MAX_TURNS`         | `40`                                                 | Hard cap on agent loop iterations.                                                              |
@@ -141,7 +142,8 @@ Runs are 24 h apart and the cache TTL is at most 1 h — caching does **not** he
 | Symptom                                | What it means                                                                                                |
 |----------------------------------------|--------------------------------------------------------------------------------------------------------------|
 | Exit 0, no PRs                         | Veille file missing/short, or every item rejected by the pre-filter, or the agent itself rejected them all.  |
-| Exit 1, `ANTHROPIC_API_KEY missing`    | Wizard hasn't run, or systemd `EnvironmentFile` is wrong.                                                    |
+| Exit 1, `ANTHROPIC_API_KEY missing`    | Wizard hasn't run, ou `EnvironmentFile` introuvable (`/opt/galaxia/config/.env`).                            |
+| PR jamais créée, push de branche OK   | `GH_TOKEN` absent de `/opt/galaxia/config/.env`. Le service systemd n'hérite pas de l'env shell — `gh auth login` ne suffit pas.    |
 | Exit 2, `no <report> block`            | Agent hit `maxTurns` or crashed mid-run. Inspect `journalctl -u galaxia-coder` for context.                  |
 | Exit 2, schema validation failure      | Agent's report JSON is malformed. Same — read the journal.                                                   |
 | PR opened but CI fails immediately     | Agent broke something. Cost: one human review-and-close. Document the failure in this README's "Known quirks" when it happens. |

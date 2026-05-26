@@ -12,6 +12,10 @@ WorkingDirectory=/home/galaxia/galaxia-project/agents/coder
 # Le wizard écrit ANTHROPIC_API_KEY ici. Le préfixe `-` rend la source
 # optionnelle : pas d'échec si le fichier n'existe pas encore (l'agent
 # fail-closera proprement avec "ANTHROPIC_API_KEY missing").
+# Variables attendues dans ce fichier :
+#   ANTHROPIC_API_KEY=sk-ant-…   (requis — LLM Claude)
+#   GH_TOKEN=ghp_…               (requis — gh pr create ; scope minimum : repo)
+#   GALAXIA_CODER_GPG_KEY_ID=…  (optionnel — signature des commits)
 EnvironmentFile=-/opt/galaxia/config/.env
 ExecStart=/usr/bin/node /home/galaxia/galaxia-project/agents/coder/index.mjs
 # Cap à 60 min : un run normal tient en 5–15 min. Au-delà = boucle, on coupe.
