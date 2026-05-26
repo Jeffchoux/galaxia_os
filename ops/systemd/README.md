@@ -17,6 +17,8 @@ un diff plutôt qu'en éditant `/etc/`.
 
 ## Installation (galaxie mère, OpenJeff)
 
+### Veille (obligatoire en premier)
+
 ```bash
 # 1. Symlinks dans /etc/systemd/system/ — pointer vers le repo, pas copier
 sudo ln -sf /home/galaxia/galaxia-project/ops/systemd/galaxia-veille.service \
@@ -33,6 +35,28 @@ systemctl status galaxia-veille.timer
 systemctl list-timers galaxia-veille.timer
 ```
 
+### Coder agent (dépend de la veille)
+
+Pré-requis avant d'activer le timer :
+- `ANTHROPIC_API_KEY` et `GH_TOKEN` posés dans `/opt/galaxia/config/.env`
+  (voir `agents/coder/README.md` § Prerequisites pour le scope PAT requis)
+- `npm install --omit=dev` exécuté dans `agents/coder/`
+
+```bash
+cd /home/galaxia/galaxia-project/agents/coder
+npm install --omit=dev
+
+sudo ln -sf /home/galaxia/galaxia-project/ops/systemd/galaxia-coder.service \
+            /etc/systemd/system/galaxia-coder.service
+sudo ln -sf /home/galaxia/galaxia-project/ops/systemd/galaxia-coder.timer \
+            /etc/systemd/system/galaxia-coder.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now galaxia-coder.timer
+
+# Vérifier
+systemctl list-timers galaxia-coder.timer
+```
+
 ## Déclencher la veille manuellement
 
 ```bash
@@ -41,6 +65,14 @@ sudo systemctl start galaxia-veille.service
 journalctl -u galaxia-veille.service -f
 # Voir le dernier rapport :
 cat /home/galaxia/galaxia-project/docs/veille/$(date -u +%F).md
+```
+
+## Déclencher le coder manuellement
+
+```bash
+sudo systemctl start galaxia-coder.service
+# Suivre en direct :
+journalctl -u galaxia-coder.service -f
 ```
 
 ## Désinstaller
