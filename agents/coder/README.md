@@ -68,6 +68,7 @@ All optional unless noted.
 | `GALAXIA_CODER_MAX_USD_PER_RUN`   | `1.00`                                               | Logged + flagged in the report `notes` when crossed. Not a hard kill (the SDK is already running). |
 | `GALAXIA_CODER_GPG_KEY_ID`        | unset                                                | If set, commits in the clone are signed with that GPG key.                                      |
 | `GALAXIA_VEILLE_DIR`              | `/home/galaxia/galaxia-project/docs/veille`          | Where to look for the day's report.                                                              |
+| `GALAXIA_CODER_RUN_DIR`           | `<GALAXIA_VEILLE_DIR>/../coder-runs`                 | Où écrire/lire les journaux de run (un `.json` par jour). Créé automatiquement si absent.        |
 | `GALAXIA_REPO_URL`                | `git@github.com:Jeffchoux/galaxia_os.git`            | Override for forks / testing.                                                                    |
 
 ## How a run proceeds
@@ -83,7 +84,7 @@ All optional unless noted.
 6. Invoke the Claude Agent SDK with the filtered veille body in the **user prompt**, the persona in the **system prompt append**, and `cwd` pinned to the clone.
 7. The agent reads `BRIEFING.md` / `CLAUDE.md` as needed, branches, edits, commits, pushes, opens PRs via `gh`.
 8. The agent emits one `<report>…</report>` JSON block as its final assistant text.
-9. `index.mjs` parses the block, validates with Zod, logs the PR URLs.
+9. `index.mjs` parses the block, validates with Zod, writes `<date>.json` to `RUN_DIR`, logs the PR URLs.
 
 Branches follow `coder/YYYY-MM-DD-<kebab-slug>`. PRs carry the `coder` label.
 

@@ -22,7 +22,7 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync, mkdtempSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -33,6 +33,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const VEILLE_DIR = process.env.GALAXIA_VEILLE_DIR
   ?? "/home/galaxia/galaxia-project/docs/veille";
+// Journal des runs précédents. Sibling du dossier veille, persisté entre runs.
+const RUN_DIR = process.env.GALAXIA_CODER_RUN_DIR
+  ?? join(VEILLE_DIR, "..", "coder-runs");
+const RECENT_RUNS_WINDOW = 7; // nombre de jours d'historique injectés dans le prompt
 const REPO_URL = process.env.GALAXIA_REPO_URL
   ?? "git@github.com:Jeffchoux/galaxia_os.git";
 const MODEL = process.env.GALAXIA_CODER_MODEL ?? "claude-sonnet-4-6";
@@ -101,6 +105,36 @@ function prefilterVeille(body) {
   return { total: items.length, kept };
 }
 
+// Lit les N derniers fichiers de run depuis RUN_DIR et retourne un résumé compact
+// à injecter dans le user prompt — empêche les propositions redondantes.
+function readRecentRuns(runDir, n) {
+  if (!existsSync(runDir)) return [];
+  const files = readdirSync(runDir)
+    .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+    .sort()
+    .slice(-n);
+  const runs = [];
+  for (const f of files) {
+    try {
+      const data = JSON.parse(readFileSync(join(runDir, f), "utf8"));
+      runs.push({ date: f.replace(".json", ""), ...data });
+    } catch {
+      // Fichier corrompu : on l'ignore silencieusement.
+    }
+  }
+  return runs;
+}
+
+// Persiste le rapport du run courant dans RUN_DIR/<date>.json.
+function writeRunLog(runDir, date, report) {
+  try {
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, `${date}.json`), JSON.stringify(report, null, 2) + "\n", "utf8");
+  } catch (err) {
+    log(`Warning: could not write run log: ${err.message}`);
+  }
+}
+
 async function main() {
   const date = today();
   const veillePath = join(VEILLE_DIR, `${date}.md`);
@@ -123,6 +157,10 @@ async function main() {
   }
   // The user prompt carries the filtered items. The full veille is NOT sent.
   const filteredBody = kept.join("\n\n");
+
+  // Injecte un résumé compact des runs récents pour éviter les doublons.
+  const recentRuns = readRecentRuns(RUN_DIR, RECENT_RUNS_WINDOW);
+  log(`Run log: ${recentRuns.length} recent run(s) found in ${RUN_DIR}`);
 
   if (!process.env.ANTHROPIC_API_KEY) {
     log("ANTHROPIC_API_KEY missing. Refusing to run.");
@@ -151,6 +189,22 @@ async function main() {
   // SDK's automatic prompt-cache hits on every turn after the first.
   const systemPromptBody = readFileSync(join(__dirname, "system-prompt.md"), "utf8");
 
+  // Section "runs récents" : injectée uniquement s'il y a de l'historique.
+  const recentRunsSection = recentRuns.length > 0
+    ? [
+        `## Runs récents (${recentRuns.length} derniers jours — ne pas ré-ouvrir ces sujets)`,
+        ``,
+        ...recentRuns.map((r) => {
+          const proposals = (r.proposals ?? [])
+            .map((p) => `  - ${p.title} → ${p.branch}`)
+            .join("\n");
+          const rejected = (r.rejected_items ?? []).length;
+          return `**${r.date}** — ${(r.proposals ?? []).length} PR(s), ${rejected} rejet(s)\n${proposals}`;
+        }),
+        ``,
+      ]
+    : [];
+
   const userPrompt = [
     `Today is ${date} (UTC).`,
     `Working tree (already cloned and on \`main\`): ${repoPath}.`,
@@ -159,6 +213,7 @@ async function main() {
       ? `DRY_RUN=1 — perform git operations locally but skip \`git push\` and \`gh pr create\`. Still produce the <report>.`
       : ``,
     ``,
+    ...recentRunsSection,
     `## Daily veille — filtered (${kept.length} items out of ${total})`,
     ``,
     `The orchestrator already removed items that don't carry PME-relevant signal. You don't need to filter further; pick from below.`,
@@ -240,6 +295,10 @@ async function main() {
   }
 
   const report = validation.data;
+
+  // Persiste le rapport pour les runs suivants (cross-run context).
+  writeRunLog(RUN_DIR, date, report);
+
   log(
     `Run summary: ${report.proposals.length} proposal(s), ` +
     `${report.rejected_items.length} rejection(s), cost=$${cumulativeCostUsd.toFixed(4)}.`,
