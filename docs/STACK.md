@@ -55,3 +55,25 @@ Ce que Galaxia ajoute par-dessus NemoClaw :
 - [ ] **Routed inference NemoClaw → Ollama** : à valider que NemoClaw permet de pointer son inférence vers un endpoint Ollama local plutôt qu'OpenAI
 - [ ] **Channels** : quels canaux activer par défaut sur les galaxies PME ? (WhatsApp et Slack semblent les plus pertinents en B2B)
 - [ ] **Wake word "Hey Galaxia"** : OpenClaw ne mentionne pas de wake word audio dans la doc ; à clarifier si c'est une couche à ajouter ou si NemoClaw l'apporte
+
+## Risques connus — NemoClaw / GPU
+
+### ⚠️ Attribution d'énergie par processus : angle mort NVIDIA (2026-05)
+
+Une analyse publiée sur arXiv (2605.27599) documente que le matériel GPU NVIDIA
+(RTX, H100, etc.) **ne peut pas** rapporter la consommation d'énergie au niveau
+du processus individuel — seule la consommation totale du GPU est exposée via
+NVML/nvidia-smi. En pratique :
+
+- Sur la **galaxie mère** (OpenJeff, CPU pur pour l'instant), aucun impact.
+- Quand le **procurement GPU** se concrétisera (prévu pour upgrader Whisper STT
+  et Kyutai TTS de CPU à GPU), il sera impossible de mesurer précisément ce que
+  consomme chaque service Galaxia (Whisper, Kyutai, NemoClaw sandbox) séparément.
+- Le **cost-tracking par utilisateur** du cockpit (`table usage`) ne pourra pas
+  inclure de coût énergie GPU granulaire — uniquement des estimations.
+
+**À retenir pour le choix du matériel GPU** : préférer un GPU avec une offre
+de monitoring processus fine (AMD ROCm expose SMI par process ; Apple MPS
+aussi) si la granularité énergie devient un critère de facturation PME. Pour
+l'instant ce n'est pas bloquant — noter pour Sprint 5+ quand la facturation
+fine sera à l'ordre du jour.
