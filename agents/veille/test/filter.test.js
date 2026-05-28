@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { filterItems, groupBySource } from '../filter.js';
+import { filterItems, groupBySource, DEFAULT_EXCLUDE_KEYWORDS } from '../filter.js';
 import { parseTrending } from '../sources/github-trending.js';
 import { parseRss } from '../sources/arxiv.js';
 
@@ -28,6 +28,25 @@ test('filterItems preserves error entries (so they show up in the report)', () =
   const kept = filterItems(items);
   assert.equal(kept.length, 1);
   assert.equal(kept[0].error, 'HTTP 503');
+});
+
+test('filterItems drops items matching an exclude keyword even if they match a keyword', () => {
+  const items = [
+    { source: 'arxiv-cs.LG', title: 'Diffusion model for agent reasoning', summary: 'LLM inference speedup' },
+    { source: 'arxiv-cs.AI', title: 'Self-hosted LLM agent framework', summary: 'on-premise deployment' },
+  ];
+  const kept = filterItems(items, { excludeKeywords: DEFAULT_EXCLUDE_KEYWORDS });
+  const titles = kept.map((i) => i.title);
+  assert.ok(!titles.includes('Diffusion model for agent reasoning'), 'excluded by diffusion model');
+  assert.ok(titles.includes('Self-hosted LLM agent framework'), 'kept because no exclude match');
+});
+
+test('filterItems excludeKeywords can be set to empty to disable exclusion', () => {
+  const items = [
+    { source: 'arxiv-cs.LG', title: 'Diffusion model for agent reasoning', summary: '' },
+  ];
+  const kept = filterItems(items, { excludeKeywords: [] });
+  assert.equal(kept.length, 1);
 });
 
 test('groupBySource groups items by source key', () => {
