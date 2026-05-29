@@ -14,7 +14,16 @@ export const getSessionSecret = () => required('SESSION_SECRET');
 // absent, et toutes les conversations existantes lui sont rattachées par migration.
 // Pré-requis pour ouvrir le cockpit à plus d'un utilisateur (Sprint 2 multi-user).
 export const getAdminEmail = () => required('ADMIN_EMAIL');
-export const getModel = () => env.COCKPIT_MODEL ?? 'claude-opus-4-7';
+// Modèle du mode "pro" (coder/améliorer Galaxia + com de Jeff) : Opus 4.8 + outils.
+export const getModel = () => env.COCKPIT_MODEL ?? 'claude-opus-4-8';
+
+// Mode "rapide" / gratuit (petites tâches), choix Jeff 2026-05-29. Groq expose une
+// API compatible OpenAI ; on s'en sert en chat nu (PAS d'outils — décision : le
+// gratuit n'a pas le function calling Galaxia). Si GROQ_API_KEY est absente, le
+// mode 'free' renvoie une erreur claire et le client peut rebasculer sur 'pro'.
+export const getGroqKey = () => env.GROQ_API_KEY ?? '';
+export const getGroqModel = () => env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
+export const getGroqBaseUrl = () => env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
 export const getDbPath = () => env.COCKPIT_DB_PATH ?? './data/cockpit.db';
 // Briefs : par défaut on lit ceux produits par le pipeline digest de la galaxie
 // mère (côté OpenJeff). Pour les filles PME, à pointer vers leur propre dir.

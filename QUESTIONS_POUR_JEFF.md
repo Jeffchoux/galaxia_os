@@ -255,3 +255,28 @@ Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + on
 **Impact si pas tranché :** je fais (c) par défaut (TikTok temps réel) — c'est la seule branche qui ne viole rien et qui te donne un gain immédiat. La voix attend ta validation explicite.
 
 </details>
+
+## 14. (Étude 2026-05-29) Fermer la boucle « j'envoie → Galaxia s'améliore »
+
+> Contexte complet : [`docs/etude-boucle.md`](docs/etude-boucle.md). Le chaînon manquant est identifié et vérifié : le digest écrit déjà les propositions `galaxia-update` dans `pending/`, mais l'agent coder les ignore (il ne lit que la veille auto), et `/opt/galaxia/config/.env` n'a pas de `GH_TOKEN` (donc le coder ne peut créer aucune PR). Voici les seules décisions qui te reviennent.
+
+**14.1 — Jeton GitHub du coder : lequel ?** (débloque TOUTE la boucle)
+- (a) **Réutiliser temporairement le PAT cockpit existant** (rapide, mais scope `repo`+`workflow` plus large que nécessaire, et sa rotation est déjà en attente). → débloque aujourd'hui.
+- (b) **Créer un jeton technique dédié au coder**, scope `repo` seul, identité séparée. → plus propre, ~5 min de ta part sur GitHub.
+- **Ma reco :** (a) pour débloquer tout de suite, (b) planifié juste après le Volet C voix.
+
+**14.2 — Vrai forward email automatique, ou workaround ?**
+- Copier-coller / forward `.txt` dans Telegram marche **dès aujourd'hui**, zéro dev.
+- Le forward email IMAP automatique = petit chantier (~80 lignes).
+- **Question :** à quelle fréquence comptes-tu envoyer par **email** plutôt que Telegram ? Si rare → on reste sur le workaround.
+
+**14.3 — Jusqu'où pousser l'auto-amélioration « avancée » ?**
+- Les briques spectaculaires (sous-agents parallèles, « Dreaming » = agent qui relit ses sessions) sont **en preview**, **plus chères en tokens**, et « Dreaming » est à **confiance faible** dans la recherche.
+- **Question :** prototyper en bac à sable maintenant (coût + risque), ou fermer d'abord la boucle simple et attendre que ça sorte de preview ?
+- **Ma reco :** fermer la boucle simple d'abord.
+
+**14.4 — Migration voix OpenAI** (hors boucle, mais sur la table)
+- Les nouveaux modèles voix temps réel sont sortis, l'ancienne API Realtime que tu utilises est dépréciée.
+- **Question :** on traite ça dans le Volet C voix, ou en priorité indépendante ? Pas urgent cette semaine.
+
+**Impact si pas tranché :** je peux livrer **dès maintenant** le chantier #2 (brancher `pending/` sur le coder) en une PR reviewable — il est inerte tant que `pending/` est vide et tant que 14.1 n'est pas réglé, donc zéro risque. Le fix `GH_TOKEN` (#0) attend ta réponse à 14.1 car c'est un choix de credential.

@@ -105,6 +105,12 @@
 	// Firefox et est partiel sur Safari. Whisper local marche partout via getUserMedia.
 	let sttBackend = $state<'browser' | 'whisper'>('whisper');
 
+	// Modèle du chat (choix Jeff 2026-05-29) :
+	// - 'free' (défaut) : LLM gratuit (Groq), chat nu, pour les petites tâches.
+	// - 'pro'  : Opus 4.8 + outils, pour coder/améliorer Galaxia + la com de Jeff.
+	// Persisté en localStorage : le dernier choix est conservé entre sessions.
+	let chatMode = $state<'pro' | 'free'>('free');
+
 	// État de la session OpenAI Realtime (D8). `realtimeHandle` est null tant
 	// qu'aucune session WebRTC n'est ouverte ; il est posé par startRealtime()
 	// et nettoyé par stop(). `realtimeState` reflète la phase de connexion.
@@ -129,6 +135,8 @@
 			if (tb === 'piper' || tb === 'browser' || tb === 'kyutai' || tb === 'realtime') ttsBackend = tb;
 			const sb = localStorage.getItem('galaxia.sttBackend');
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
+			const cm = localStorage.getItem('galaxia.chatMode');
+			if (cm === 'pro' || cm === 'free') chatMode = cm;
 		} catch {
 			/* localStorage indispo */
 		}
@@ -196,6 +204,7 @@
 				localStorage.setItem('galaxia.wakeWord', wakeWord ? '1' : '0');
 				localStorage.setItem('galaxia.ttsBackend', ttsBackend);
 				localStorage.setItem('galaxia.sttBackend', sttBackend);
+				localStorage.setItem('galaxia.chatMode', chatMode);
 			}
 		} catch {
 			/* idem */
@@ -690,7 +699,7 @@
 			const res = await fetch('/api/chat', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ conversation_id: conversationId, message: text }),
+				body: JSON.stringify({ conversation_id: conversationId, message: text, mode: chatMode }),
 				signal: chatAbortController.signal
 			});
 			if (!res.ok || !res.body) {
@@ -1243,6 +1252,19 @@
 						if (t.files) uploadFiles(t.files);
 					}}
 				/>
+				<button
+					type="button"
+					class="mode-toggle"
+					class:pro={chatMode === 'pro'}
+					onclick={() => (chatMode = chatMode === 'pro' ? 'free' : 'pro')}
+					disabled={sending}
+					title={chatMode === 'pro'
+						? 'Modèle : Opus 4.8 + outils (coder / améliorer Galaxia / com). Clique pour repasser en mode rapide gratuit.'
+						: 'Modèle : rapide & gratuit (Groq), chat nu, pour les petites tâches. Clique pour passer en Opus 4.8.'}
+					aria-label="Changer de modèle"
+				>
+					{chatMode === 'pro' ? '🧠 Opus' : '⚡ Rapide'}
+				</button>
 				<button
 					type="button"
 					class="attach"
@@ -1966,6 +1988,37 @@
 		color: #fff;
 	}
 	.attach:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	/* Toggle modèle : gratuit (défaut) vs Opus 4.8. Pilule compacte qui montre
+	   le modèle actif ; passe en violet plein quand on est en mode pro. */
+	.mode-toggle {
+		flex-shrink: 0;
+		height: 2.7rem;
+		padding: 0 0.7rem;
+		background: rgba(124, 58, 237, 0.1);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
+		border-radius: 10px;
+		font-size: 0.82rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+		display: grid;
+		place-items: center;
+		transition: all 0.15s;
+	}
+	.mode-toggle:hover:not(:disabled) {
+		background: var(--g-primary-25);
+		color: #fff;
+	}
+	.mode-toggle.pro {
+		background: var(--g-primary);
+		border-color: var(--g-primary);
+		color: #fff;
+	}
+	.mode-toggle:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}

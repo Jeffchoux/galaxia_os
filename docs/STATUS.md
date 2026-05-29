@@ -1,7 +1,37 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-29** — Voix cockpit basculée **cross-browser par défaut** (cascade serveur Whisper + Kyutai). Web Speech reste optionnel via toggle. Cockpit défaut modèle bascule sur `claude-opus-4-8` (sortie 2026-05-28). Restart `galaxia-cockpit.service` requis pour activer. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-29** — Voix cockpit basculée **cross-browser par défaut** (cascade serveur Whisper + Kyutai). Web Speech reste optionnel via toggle. **Sélecteur de modèle dans le chat** : mode « rapide » gratuit (Groq) par défaut, mode Opus 4.8 + outils à la demande (cf. section dédiée ci-dessous). Restart `galaxia-cockpit.service` requis pour activer. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Sélecteur de modèle chat : gratuit par défaut / Opus à la demande (2026-05-29, session root)
+
+Demande Jeff : Opus 4.8 réservé à « coder/améliorer Galaxia + ma com », LLM **gratuit**
+pour toutes les petites tâches, bascule **depuis le browser**. Aligne la politique
+« pas de modèle premium par défaut » (le défaut Opus précédent la violait).
+
+Livré (build OK, `svelte-check` 0 erreur) :
+- **Deux modes** côté serveur (`streamReply(..., mode)` dans `claude.ts`) :
+  - `free` (**défaut**) : **Groq**, API compatible OpenAI, chat **nu** (pas d'outils,
+    pas de docs/vision, pas de mémoire persistante injectée). Nouveau module
+    `src/lib/server/groq.ts` (streaming SSE en `fetch` direct, zéro nouvelle dép).
+  - `pro` : **Opus 4.8 + outils** (comportement existant inchangé).
+- **Prompt système** scindé : tronc commun + section outils (pro uniquement) +
+  note « mode rapide » qui invite Jeff à passer en Opus pour les tâches lourdes.
+- **Toggle dans le composer** (`+page.svelte`, bouton `⚡ Rapide` / `🧠 Opus`),
+  persistant en `localStorage` (`galaxia.chatMode`), envoyé dans le POST `/api/chat`.
+- **Coût** : Groq enregistré dans `usage` à **coût 0** (suivi du volume). Le défaut
+  serveur est `free` même si le client n'envoie pas `mode` (jamais de premium par défaut).
+- **Tracking résiduel** : `generateTitle`/résumé restent sur Haiku (micro-coût) quel
+  que soit le mode.
+
+**À faire par Jeff :**
+1. Créer une clé gratuite sur https://console.groq.com → la poser dans
+   `apps/cockpit/.env` (`GROQ_API_KEY=...`). Tant qu'elle est vide, le mode rapide
+   renvoie une erreur claire et le mode Opus marche.
+2. `sudo systemctl restart galaxia-cockpit.service`.
+
+**Limite connue :** en mode rapide, un document joint est ignoré (chat nu) — la note
+système dit à Galaxia de suggérer le mode Opus si la tâche touche un fichier.
 
 ## Galaxia 2.0 — refonte UI « copie conforme Claude Code » (2026-05-29, session root)
 

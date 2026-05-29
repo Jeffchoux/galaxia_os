@@ -5,6 +5,7 @@ import { loadMemory } from './memory';
 import { recordUsage, type Conversation, type Document, type Message as DbMessage } from './db';
 import { computeCostMicros, type TokenUsage } from './pricing';
 import { executeTool, loadAllTools } from './tools';
+import { streamGroqReply } from './groq';
 
 // Persiste un appel Anthropic dans la table `usage` pour le cost tracking.
 // Best-effort : on log et avale les erreurs (l'enregistrement ne doit JAMAIS
@@ -36,18 +37,27 @@ function client(): Anthropic {
 	return _client;
 }
 
-const BASE_SYSTEM = `Tu es Galaxia, l'IA du cockpit de Jeff (créateur du projet Galaxia, manager non-développeur).
+// Tronc commun aux deux modes (pro = Opus 4.8 + outils ; free = Groq, chat nu).
+const BASE_SYSTEM_CORE = `Tu es Galaxia, l'IA du cockpit de Jeff (créateur du projet Galaxia, manager non-développeur).
 
 Galaxia est un écosystème IA souverain, open-source et gratuit pour PME : chaque PME l'installe sur son propre serveur avec ses propres clés API. Tu es le cockpit de la galaxie mère (OpenJeff). Tu parles en français par défaut.
 
-Style : direct, sans flagornerie, sans phrases d'introduction inutiles. Réponses courtes par défaut, longues seulement quand le sujet l'exige. Markdown standard supporté. Pas d'emoji sauf si Jeff en demande.
+Style : direct, sans flagornerie, sans phrases d'introduction inutiles. Réponses courtes par défaut, longues seulement quand le sujet l'exige. Markdown standard supporté. Pas d'emoji sauf si Jeff en demande.`;
 
-Tu disposes de tools (function calling) :
+// N'est ajouté qu'en mode "pro" : en mode gratuit (Groq) il n'y a aucun outil, donc
+// on ne doit pas promettre à Galaxia des capacités qu'elle n'a pas.
+const TOOLS_SECTION = `Tu disposes de tools (function calling) :
 - update_memory : utilise-le PROACTIVEMENT dès que Jeff t'apprend quelque chose qu'il faudrait retenir entre sessions (préférence, projet, contact, décision). Ne lui demande pas la permission, écris simplement la note et continue. Reste sobre — note ce qui est durable, pas chaque détail conversationnel.
 - read_brief / list_briefs : pour récupérer un brief du pipeline digest si Jeff y fait référence ou si c'est utile au contexte.
 - Filesystem (via MCP) : tu peux lire et explorer les fichiers de /home/galaxia/galaxia-project (le repo Galaxia), /home/galaxia/.claude/galaxia/briefs et /home/galaxia/.claude/galaxia/knowledge. Sers-t'en quand Jeff te demande d'aller voir un fichier, d'expliquer une partie du code, ou de chercher quelque chose dans le projet.
 
 Tu n'as pas besoin d'annoncer chaque tool call ; agis et continue.`;
+
+// Mode "rapide" : on prévient Galaxia qu'elle tourne sur un modèle léger sans outils,
+// pour qu'elle invite Jeff à passer en mode Opus si la tâche dépasse le chat simple.
+const FREE_MODE_NOTE = `Tu tournes en mode "rapide" sur un modèle léger et gratuit, sans aucun outil (pas d'accès fichiers, pas de mémoire persistante, pas de briefs). C'est fait pour les petites tâches et le chat courant. Si Jeff demande quelque chose qui nécessite de lire un fichier du projet, d'écrire en mémoire, ou un raisonnement lourd, dis-lui en une phrase de basculer en mode Opus (bouton modèle dans le composer).`;
+
+export type ChatMode = 'pro' | 'free';
 
 export interface ChatTurn {
 	role: 'user' | 'assistant';
@@ -80,9 +90,16 @@ function buildDateLine(now: Date = new Date()): string {
 	return `Date et heure actuelles côté serveur (Europe/Paris) : ${date}, ${time}. Réfère-toi à cette date plutôt qu'à ta date d'entraînement quand Jeff te demande "on est quel jour" ou raisonne sur des échéances.`;
 }
 
-export function buildSystemPrompt(conversation: Conversation | null): string {
-	const parts = [BASE_SYSTEM, buildDateLine()];
-	const memory = loadMemory();
+export function buildSystemPrompt(
+	conversation: Conversation | null,
+	mode: ChatMode = 'pro'
+): string {
+	const base =
+		mode === 'pro' ? `${BASE_SYSTEM_CORE}\n\n${TOOLS_SECTION}` : `${BASE_SYSTEM_CORE}\n\n${FREE_MODE_NOTE}`;
+	const parts = [base, buildDateLine()];
+	// La mémoire persistante n'est servie qu'en mode pro : en mode gratuit on annonce
+	// justement à Galaxia qu'elle n'y a pas accès (et update_memory n'existe pas).
+	const memory = mode === 'pro' ? loadMemory() : '';
 	if (memory) {
 		parts.push(`---\n\nMémoire persistante (édite via le fichier memory.md sur le serveur) :\n\n${memory}`);
 	}
@@ -249,13 +266,23 @@ export async function* streamReply(
 	conversation: Conversation | null,
 	history: DbMessage[],
 	docs: Document[] = [],
-	userId: string | null = null
+	userId: string | null = null,
+	mode: ChatMode = 'pro'
 ): AsyncGenerator<StreamEvent, void, unknown> {
+	const convId = conversation?.id ?? null;
+	const system = buildSystemPrompt(conversation, mode);
+
+	// Mode "rapide" / gratuit : Groq, chat nu (pas d'outils, pas de documents/vision).
+	// On délègue entièrement au générateur Groq et on s'arrête là.
+	if (mode === 'free') {
+		const turns = buildClaudeMessages(conversation, history);
+		yield* streamGroqReply(system, turns, userId, convId);
+		return;
+	}
+
 	const messages = buildMessageParams(conversation, history, docs);
-	const system = buildSystemPrompt(conversation);
 	const allTools = await loadAllTools();
 	const model = getModel();
-	const convId = conversation?.id ?? null;
 
 	for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
 		const stream = client().messages.stream({

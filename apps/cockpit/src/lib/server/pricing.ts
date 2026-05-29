@@ -53,6 +53,15 @@ const PRICING: Record<string, ModelPricing> = {
 		output: 4,
 		cache_create_multiplier: 1.25,
 		cache_read_multiplier: 0.1
+	},
+	// Groq free tier (mode "rapide", choix Jeff 2026-05-29) : pas de coût direct.
+	// On enregistre quand même les tokens dans `usage` (à coût 0) pour suivre le
+	// volume du mode gratuit. Si GROQ_MODEL change, ajouter l'entrée correspondante.
+	'llama-3.3-70b-versatile': {
+		input: 0,
+		output: 0,
+		cache_create_multiplier: 0,
+		cache_read_multiplier: 0
 	}
 };
 

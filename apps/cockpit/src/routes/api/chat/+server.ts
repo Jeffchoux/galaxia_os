@@ -13,7 +13,8 @@ import {
 	generateTitle,
 	shouldSummarize,
 	streamReply,
-	summarizeHistory
+	summarizeHistory,
+	type ChatMode
 } from '$lib/server/claude';
 
 async function maybeSummarize(conversation: Conversation, userId: string): Promise<void> {
@@ -35,9 +36,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
 	const userId = locals.user.id;
 
-	const body = (await request.json()) as { conversation_id?: string; message?: string };
+	const body = (await request.json()) as {
+		conversation_id?: string;
+		message?: string;
+		mode?: string;
+	};
 	const userMessage = (body.message ?? '').trim();
 	if (!userMessage) throw error(400, 'empty message');
+	// Défaut = 'free' (Groq) : la politique de Jeff est "pas de modèle premium par
+	// défaut". Le mode pro (Opus 4.8) est explicitement demandé par le client.
+	const mode: ChatMode = body.mode === 'pro' ? 'pro' : 'free';
 
 	let conversation = body.conversation_id
 		? getConversation(body.conversation_id, userId)
@@ -62,7 +70,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 			let assistantText = '';
 			try {
-				for await (const event of streamReply(convAtTurnStart, history, docs, userId)) {
+				for await (const event of streamReply(convAtTurnStart, history, docs, userId, mode)) {
 					if (event.kind === 'delta') {
 						assistantText += event.text;
 						send('delta', { text: event.text });
