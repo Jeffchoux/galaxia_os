@@ -3,6 +3,32 @@
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
 > Dernière révision : **2026-05-25** — **Sprint 3 pivoté** (D6 tranchée par Jeff) : thème = Voix Jarvis + TikTok temps réel + Arbo Dropbox, dogfooding galaxie mère uniquement. PME pilote glisse à Sprint 4. Détail dans [`DECISIONS.md`](DECISIONS.md) § D6 et plan chiffré dans [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md) § Sprint 3. Stack voix retenue : Picovoice Porcupine WASM + Kyutai STT/TTS (GPU mère) + cascade STT→Claude→TTS. D1/D2/D3 toujours ouvertes ; D2 (PME pilote) butoir 2026-06-21 désormais purement informatif (déplacement assumé Q3→Q3-Q4).
 
+## Audit système — 2026-05-29 (session root)
+
+État réel vérifié sur OpenJeff, à jour de la fin du Sprint 3 (PR #19). Corrige
+plusieurs points devenus faux dans la table « Services qui tournent » ci-dessous.
+
+- **Pas de GPU sur le VPS** (`nvidia-smi` absent). La stack voix tourne en **int8 CPU**,
+  pas « GPU mère » comme l'indique la roadmap : Whisper STT (`faster-whisper large-v3-turbo`,
+  `127.0.0.1:5500/5502`) + Kyutai Pocket TTS (`french_24l`, `127.0.0.1:5501`) + Piper. Les trois
+  daemons sont **actifs**. Latence/débit voix plafonnés par le CPU — à garder en tête pour la 2.0.
+- **Services actifs confirmés** : caddy, docker, ollama, `galaxia-cockpit` (`127.0.0.1:3001`),
+  `galaxia-bot` (Telegram), `galaxia-piper`, `galaxia-kyutai-tts`, `galaxia-whisper`.
+- **Timers daily** : `galaxia-digest` (06:00), `galaxia-veille` (06:32), `galaxia-coder` (07:01).
+- **`galaxia-update.timer` : introuvable** (`systemctl is-enabled` → not-found) alors que ce doc le
+  disait `enabled`. À investiguer (supprimé ? renommé ?).
+- **Ollama** : `llama3.1:8b` présent mais **0 modèle chargé en RAM** (`ollama ps` vide) → cold start
+  à chaque appel local.
+- **Réseau sain** : UFW restrictif (22/80/443 publics ; 8080/11435 scopés `172.19.0.0/16`),
+  tout le reste en `127.0.0.1`, Caddyfile système == repo (aucun drift), fail2ban actif.
+- **Sécurité corrigée ce jour** : `/opt/agents/telegram-bot/.env` était en `644` (world-readable)
+  → repassé `600`. Repo Galaxia avait de nombreux fichiers `root`-owned (piège double-compte) →
+  `chown -R galaxia:galaxia` appliqué.
+- **Cockpit** : `COCKPIT_MODEL=claude-opus-4-7` (défaut codé `env.ts` = opus-4-7 aussi). ⚠️ Incohérent
+  avec D3 (Sonnet par défaut pour le coût) — défaut premium non corrigé, à trancher. `claude-opus-4-8`
+  ajouté à `pricing.ts` (sorti 2026-05-28, prix annoncé identique à 4.7) : sélectionnable via
+  `COCKPIT_MODEL=claude-opus-4-8`, **pas mis en défaut**.
+
 ## Bootstrap éclair pour un nouvel agent
 
 Si tu viens d'ouvrir une session dans ce repo, lis dans cet ordre (5 min) :
