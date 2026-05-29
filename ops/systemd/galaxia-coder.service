@@ -28,4 +28,9 @@ ProtectControlGroups=true
 # ProtectSystem=strict monte aussi /tmp en read-only par défaut. PrivateTmp=true
 # donne au service son propre namespace /tmp writable et isolé des autres services.
 PrivateTmp=true
-# /home reste read/write par défaut (nécessaire pour npm cache + .ssh + .config/gh).
+# ProtectSystem=strict monte TOUT le reste (dont /home) en lecture seule. L'agent
+# clone et édite dans son /tmp privé, donc il n'a pas besoin d'écrire sous /home…
+# SAUF pour consommer les propositions curées : le pont déplace
+# galaxia-updates/pending/*.md vers applied/. On ré-ouvre en écriture cet arbre
+# précis, et lui seul. Le reste de /home (clés SSH, config gh) reste lisible.
+ReadWritePaths=/home/galaxia/.claude/galaxia/galaxia-updates

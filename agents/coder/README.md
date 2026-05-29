@@ -1,6 +1,15 @@
 # agents/coder — Galaxia daily improvement agent
 
-The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:00 UTC, this agent reads the night's veille report, picks 1 to 3 actionable items, and opens improvement PRs on `Jeffchoux/galaxia_os`. Because it's the first, it also acts as the **reference for token economics** that every future Galaxia agent should copy.
+The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:00 UTC, this agent reads two sources — **curated proposals Jeff sent over Telegram** (priority) and the **auto-collected IA veille** (secondary) — picks up to 3 actionable items, and opens improvement PRs on `Jeffchoux/galaxia_os`. Because it's the first, it also acts as the **reference for token economics** that every future Galaxia agent should copy.
+
+## The two input sources
+
+| Source                | Where it comes from                                                                                                                                                  | Priority |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
+| **Curated proposals** | Jeff forwards TikToks / tweets to the Telegram bot → the daily digest (`~/.claude/galaxia/pipeline/process_inbox.py`) transcribes + categorizes them and writes the `galaxia-update` ones as markdown in `~/.claude/galaxia/galaxia-updates/pending/`. | **High** — handled first. |
+| **Daily veille**      | `galaxia-veille.timer` writes `docs/veille/<today>.md` (HackerNews, GitHub, arXiv, HF), keyword pre-filtered here.                                                   | Lower — only after curated. |
+
+At startup, `index.mjs` **claims** every pending proposal by moving it `pending/ → applied/` with an atomic `rename(2)`. This is the anti-replay guard: a re-triggered or concurrent run can never pick the same proposal twice. A proposal that fails mid-run is **not** put back (it stays in `applied/`); we accept losing it over the worse failure of opening a duplicate PR — it also lives in the day's brief and can be re-dropped by hand. The digest pipeline lives **outside this repo** (it's mother-machine-only); a fille that doesn't run it simply has no `pending/` dir, and the bridge stays inert.
 
 ## Stack
 
@@ -21,9 +30,11 @@ The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:
 ## Prerequisites on the host
 
 - `ANTHROPIC_API_KEY` exported (the wizard writes it to `/opt/galaxia/config/.env`; the systemd unit sources that file).
-- `gh` CLI authenticated on the host, **or** `GH_TOKEN` env var set (auto-passed through by systemd).
-- Git configured with SSH access to `Jeffchoux/galaxia_os` (true on OpenJeff via the existing deploy key).
-- The day's veille report exists at `/home/galaxia/galaxia-project/docs/veille/<today>.md` (the `galaxia-veille.timer` writes it at 06:30 UTC).
+- `GH_TOKEN` set in `/opt/galaxia/config/.env` so the agent's `gh pr create` authenticates non-interactively under systemd. **Caveat:** on OpenJeff this currently reuses the cockpit PAT, scope `public_repo` only — enough because `galaxia_os` is public, but it **cannot push to `.github/workflows/`** (no `workflow` scope). A proposal that touches CI will fail at push; the agent records that in the report. (Planned: a dedicated `repo`-scoped token.)
+- Git configured with SSH access to `Jeffchoux/galaxia_os` (true on OpenJeff via the existing deploy key) — push uses SSH, PR creation uses `GH_TOKEN`.
+- The `coder` and `discussion` labels exist on the repo (the agent passes `--label coder`; missing labels make `gh pr create` fail).
+- Optionally, the day's veille report at `docs/veille/<today>.md`. With curated proposals waiting, the veille is **not** required for a run to happen.
+- The unit grants `ReadWritePaths=/home/galaxia/.claude/galaxia/galaxia-updates` (otherwise `ProtectSystem=strict` makes the claim-`mv` fail with `EROFS`).
 
 ## Install on the host (one-time)
 
@@ -69,15 +80,17 @@ All optional unless noted.
 | `GALAXIA_CODER_GPG_KEY_ID`        | unset                                                | If set, commits in the clone are signed with that GPG key.                                      |
 | `GALAXIA_VEILLE_DIR`              | `/home/galaxia/galaxia-project/docs/veille`          | Where to look for the day's report.                                                              |
 | `GALAXIA_REPO_URL`                | `git@github.com:Jeffchoux/galaxia_os.git`            | Override for forks / testing.                                                                    |
+| `GALAXIA_PENDING_DIR`             | `/home/galaxia/.claude/galaxia/galaxia-updates/pending`  | Where the digest drops curated proposals. Absent dir → bridge inert.                         |
+| `GALAXIA_APPLIED_DIR`             | `/home/galaxia/.claude/galaxia/galaxia-updates/applied`  | Where claimed proposals are atomically moved before the run.                                  |
 
 ## How a run proceeds
 
 1. `galaxia-coder.timer` fires at ~07:00 UTC (+ up to 5 min jitter).
-2. `index.mjs` checks for `<today>.md` in the veille directory:
-   - Missing or empty → exit `0` immediately, **no API call**.
-3. Pre-filter the veille body in pure Node:
-   - Split into bullet items, keep only those whose text matches the PME keyword list (`ollama`, `mcp`, `rag`, `agent`, `docker`, `cosign`, `souverain`, etc.).
-   - Bail out cleanly if zero items match — **still no API call**.
+2. `index.mjs` **claims** the curated proposals: every `*.md` in `pending/` is moved to `applied/` with an atomic `rename(2)` and read into memory.
+3. It then checks for `<today>.md` in the veille directory and pre-filters it in pure Node:
+   - Missing / `< 200` chars → no veille items this run.
+   - Otherwise: split into bullet items, keep only those whose text matches the PME keyword list (`ollama`, `mcp`, `rag`, `agent`, `docker`, `cosign`, `souverain`, etc.).
+   - **If there are zero curated proposals AND zero kept veille items → exit `0`, no API call.**
 4. Clone `Jeffchoux/galaxia_os` shallow (`--depth 50`) to `/tmp/galaxia-coder-<date>-XXXXXX/galaxia_os`.
 5. Set **local** git identity and (optionally) GPG signing on that checkout. Global config is never touched.
 6. Invoke the Claude Agent SDK with the filtered veille body in the **user prompt**, the persona in the **system prompt append**, and `cwd` pinned to the clone.
@@ -93,11 +106,7 @@ This agent is the first Galaxia code that calls the paid Anthropic API. Every fu
 
 ### 1. Don't call the API unless there's work to do
 
-`index.mjs` does **two cheap, local short-circuits** before the API is touched:
-- Veille file missing or `< 200` chars → exit `0`.
-- Veille file present but **zero keyword matches** in the pre-filter → exit `0`.
-
-A daily run on a quiet day costs **zero tokens**.
+`index.mjs` short-circuits **before the API is touched** whenever there is genuinely nothing to do — i.e. **no curated proposal claimed AND** the veille is missing, `< 200` chars, or yields **zero keyword matches**. On a quiet day (no Telegram input, dull veille) that means a daily run costs **zero tokens**. A single curated proposal is enough on its own to make the run proceed, even with an empty veille.
 
 ### 2. Send the API only what it needs
 
