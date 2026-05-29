@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-29** — Voix cockpit basculée **cross-browser par défaut** (cascade serveur Whisper + Kyutai). Web Speech reste optionnel via toggle. **Sélecteur de modèle dans le chat** : mode « rapide » gratuit (Groq) par défaut, mode Opus 4.8 + outils à la demande (cf. section dédiée ci-dessous). Restart `galaxia-cockpit.service` requis pour activer. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-29** — **Galaxia 2.0 increment 2** livré et **déployé** (build + restart faits) : **WS3 Projets** (regroupement des conversations dans la sidebar) + **WS4 Vue Code** (onglet Code dans Arfa branché sur l'arborescence réelle du repo, lecture seule). Détail § « refonte UI » ci-dessous. Avant : voix cockpit **cross-browser par défaut** (cascade serveur Whisper + Kyutai) + **sélecteur de modèle** gratuit (Groq) / Opus à la demande. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
 
 ## Sélecteur de modèle chat : gratuit par défaut / Opus à la demande (2026-05-29, session root)
 
@@ -47,10 +47,26 @@ Livré (increment 1) :
   (`sidebar | chat | Arfa`). Le panneau **Arfa** (artefacts) remplace l'ancienne
   modale d'aperçu document : docké à droite, animé, repli sous 1100px en overlay.
 
-Reste à faire (workstreams suivis dans les tasks de session) :
-- **WS3 Projets** : table `projects` + `conversations.project_id`, regroupement sidebar.
-- **WS4 Vue code agentique** : onglet Code dans Arfa, édition pilotée par l'agent coder.
-- Refinement : rendu inline markdown/code dans Arfa (actuellement iframe `/api/documents/[id]`).
+Livré (increment 2 — 2026-05-29, session root) :
+- **WS3 Projets** : table `projects` + colonne `conversations.project_id` (migration
+  idempotente, `ON DELETE SET NULL` → supprimer un projet conserve ses conversations).
+  Helpers DB (`listProjects/createProject/renameProject/deleteProject/setConversationProject`),
+  routes `/api/projects` (POST/PATCH/DELETE) et `/api/conversations` (POST accepte
+  `project_id`, nouveau PATCH pour ranger une conv). Sidebar : projets repliables
+  (état persisté en `localStorage`), `＋`/`✎`/`🗑` par projet, section « Hors projet »,
+  sélecteur de projet dans l'entête du chat. Tout vérifié de bout en bout.
+- **WS4 Vue Code** (lecture seule, choix Jeff) : onglet **Code** dans Arfa branché
+  sur l'**arborescence réelle du repo** (`getCodeRoot()`, défaut `/home/galaxia/galaxia-project`)
+  — la même que l'agent coder édite via MCP. Endpoint `/api/code` (tree + lecture
+  fichier) avec gardes : auth, anti-traversée (realpath + containment, symlinks
+  compris), filtre `node_modules/.git/build/data/…`, rejet binaire et > 512 Kio.
+  Rendu fichier avec numéros de ligne ; bouton ⟳ pour resynchroniser après édition
+  agent ; panneau élargi (`--g-arfa-w-wide`) en mode Code. `svelte-check` 0 erreur.
+  L'édition depuis le browser reste volontairement hors périmètre (l'agent édite).
+
+Reste à faire :
+- Refinement : rendu inline markdown/code dans Arfa onglet Doc (actuellement iframe `/api/documents/[id]`).
+- Coloration syntaxique dans la vue Code (actuellement mono + numéros de ligne, sans tokenizer).
 
 ## Audit système — 2026-05-29 (session root)
 

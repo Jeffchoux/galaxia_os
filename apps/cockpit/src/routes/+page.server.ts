@@ -3,7 +3,8 @@ import type { PageServerLoad } from './$types';
 import {
 	listConversationDocuments,
 	listConversations,
-	listMessages
+	listMessages,
+	listProjects
 } from '$lib/server/db';
 import { listBriefs } from '$lib/server/briefs';
 
@@ -11,6 +12,7 @@ export const load: PageServerLoad = ({ url, locals }) => {
 	if (!locals.user) throw error(401, 'unauthorized');
 	const userId = locals.user.id;
 	const conversations = listConversations(userId);
+	const projects = listProjects(userId);
 	const requestedId = url.searchParams.get('c');
 	const active = requestedId
 		? conversations.find((c) => c.id === requestedId)
@@ -20,6 +22,7 @@ export const load: PageServerLoad = ({ url, locals }) => {
 	const briefs = listBriefs().slice(0, 5);
 	return {
 		conversations,
+		projects,
 		active: active ?? null,
 		messages,
 		documents,

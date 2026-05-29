@@ -19,6 +19,15 @@ export interface Conversation {
 	updated_at: number;
 	summary: string | null;
 	summary_until_idx: number;
+	project_id: string | null;
+}
+
+export interface Project {
+	id: string;
+	user_id: string;
+	name: string;
+	created_at: number;
+	updated_at: number;
 }
 
 export interface Message {
@@ -86,16 +95,35 @@ function prepare(db: Database.Database) {
 			'SELECT * FROM conversations WHERE id = ? AND user_id = ?'
 		),
 		createConversation: db.prepare(
-			'INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+			'INSERT INTO conversations (id, user_id, title, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
 		),
 		updateConversation: db.prepare(
 			'UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?'
+		),
+		setConversationProject: db.prepare(
+			'UPDATE conversations SET project_id = ?, updated_at = ? WHERE id = ? AND user_id = ?'
 		),
 		touchConversation: db.prepare(
 			'UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?'
 		),
 		updateSummary: db.prepare(
 			'UPDATE conversations SET summary = ?, summary_until_idx = ?, updated_at = ? WHERE id = ? AND user_id = ?'
+		),
+		// ─── projects (regroupement des conversations, style Claude Code) ────
+		listProjects: db.prepare<[string], Project>(
+			'SELECT * FROM projects WHERE user_id = ? ORDER BY created_at ASC'
+		),
+		getProject: db.prepare<[string, string], Project>(
+			'SELECT * FROM projects WHERE id = ? AND user_id = ?'
+		),
+		createProject: db.prepare(
+			'INSERT INTO projects (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+		),
+		renameProject: db.prepare(
+			'UPDATE projects SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?'
+		),
+		deleteProject: db.prepare(
+			'DELETE FROM projects WHERE id = ? AND user_id = ?'
 		),
 		// ─── messages (héritent du user_id via la conversation) ──────────────
 		listMessages: db.prepare<[string, string], Message>(
@@ -189,6 +217,13 @@ function migrate(db: Database.Database) {
 	// CREATE TABLE de stmts() et l'index est posé ici sans rejouer l'ALTER.
 	db.exec('CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id, updated_at DESC)');
 
+	// Regroupement par projet (Galaxia 2.0 WS3). project_id ajouté sans NOT NULL
+	// (une conversation peut ne pas appartenir à un projet — section « hors projet »).
+	if (!convCols.has('project_id')) {
+		db.exec('ALTER TABLE conversations ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL');
+	}
+	db.exec('CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_id, updated_at DESC)');
+
 	// 2. Provision de l'admin (Jeff) + backfill des conversations historiques
 	const adminEmail = getAdminEmail();
 	const existing = db
@@ -221,6 +256,14 @@ function stmts() {
 			role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin','member')),
 			created_at INTEGER NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS projects (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id, created_at);
 		CREATE TABLE IF NOT EXISTS conversations (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT 'Nouvelle conversation',
@@ -228,7 +271,8 @@ function stmts() {
 			updated_at INTEGER NOT NULL,
 			summary TEXT,
 			summary_until_idx INTEGER NOT NULL DEFAULT 0,
-			user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+			user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+			project_id TEXT REFERENCES projects(id) ON DELETE SET NULL
 		);
 		CREATE TABLE IF NOT EXISTS messages (
 			id TEXT PRIMARY KEY,
@@ -317,11 +361,17 @@ export function getConversation(id: string, userId: string): Conversation | unde
 	return stmts().getConversation.get(id, userId);
 }
 
-export function createConversation(userId: string, title?: string): Conversation {
+export function createConversation(
+	userId: string,
+	title?: string,
+	projectId?: string | null
+): Conversation {
 	const now = Date.now();
 	const id = randomUUID();
 	const t = title ?? 'Nouvelle conversation';
-	stmts().createConversation.run(id, userId, t, now, now);
+	// Garde : si un projet est demandé, il doit appartenir à l'utilisateur.
+	const pid = projectId && getProject(projectId, userId) ? projectId : null;
+	stmts().createConversation.run(id, userId, t, pid, now, now);
 	return {
 		id,
 		user_id: userId,
@@ -329,8 +379,47 @@ export function createConversation(userId: string, title?: string): Conversation
 		created_at: now,
 		updated_at: now,
 		summary: null,
-		summary_until_idx: 0
+		summary_until_idx: 0,
+		project_id: pid
 	};
+}
+
+// ─── projects ───────────────────────────────────────────────────────────────
+
+export function listProjects(userId: string): Project[] {
+	return stmts().listProjects.all(userId);
+}
+
+export function getProject(id: string, userId: string): Project | undefined {
+	return stmts().getProject.get(id, userId);
+}
+
+export function createProject(userId: string, name: string): Project {
+	const now = Date.now();
+	const id = randomUUID();
+	const n = name.trim() || 'Nouveau projet';
+	stmts().createProject.run(id, userId, n, now, now);
+	return { id, user_id: userId, name: n, created_at: now, updated_at: now };
+}
+
+export function renameProject(id: string, userId: string, name: string): void {
+	stmts().renameProject.run(name.trim() || 'Projet', Date.now(), id, userId);
+}
+
+// Supprime le projet ; les conversations rattachées repassent « hors projet »
+// (project_id → NULL via la clause ON DELETE SET NULL).
+export function deleteProject(id: string, userId: string): boolean {
+	return stmts().deleteProject.run(id, userId).changes > 0;
+}
+
+// Range (ou sort, si projectId = null) une conversation dans un projet.
+export function setConversationProject(
+	id: string,
+	userId: string,
+	projectId: string | null
+): void {
+	const pid = projectId && getProject(projectId, userId) ? projectId : null;
+	stmts().setConversationProject.run(pid, Date.now(), id, userId);
 }
 
 export function renameConversation(id: string, userId: string, title: string): void {

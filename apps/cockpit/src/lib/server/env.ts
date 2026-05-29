@@ -25,6 +25,12 @@ export const getGroqKey = () => env.GROQ_API_KEY ?? '';
 export const getGroqModel = () => env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
 export const getGroqBaseUrl = () => env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1';
 export const getDbPath = () => env.COCKPIT_DB_PATH ?? './data/cockpit.db';
+// Racine de la « vue Code » (Galaxia 2.0 WS4) : l'arborescence du repo que
+// l'agent coder édite via MCP filesystem. Lecture seule, servie par /api/code
+// derrière l'auth, avec garde anti-traversée. Pour les filles PME, à pointer
+// vers leur propre checkout (ou à laisser vide pour désactiver la vue Code).
+export const getCodeRoot = () =>
+	env.COCKPIT_CODE_ROOT ?? '/home/galaxia/galaxia-project';
 // Briefs : par défaut on lit ceux produits par le pipeline digest de la galaxie
 // mère (côté OpenJeff). Pour les filles PME, à pointer vers leur propre dir.
 export const getBriefsDir = () =>

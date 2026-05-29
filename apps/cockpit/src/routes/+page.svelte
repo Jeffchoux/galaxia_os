@@ -111,6 +111,49 @@
 	// Persisté en localStorage : le dernier choix est conservé entre sessions.
 	let chatMode = $state<'pro' | 'free'>('free');
 
+	// ─── Projets (WS3) — regroupement des conversations façon Claude Code ───
+	type Project = { id: string; name: string };
+	// Conversation en attente d'être créée dans ce projet (ensureConversation
+	// le passe au POST). null = conversation hors projet.
+	let pendingProjectId = $state<string | null>(null);
+	let collapsedProjects = $state<Set<string>>(new Set());
+	let creatingProject = $state(false);
+	let newProjectName = $state('');
+
+	// Regroupe les conversations du load par projet. Recalculé à chaque
+	// invalidateAll (le load renvoie conversations + projects à jour).
+	const grouped = $derived.by(() => {
+		const byProject = new Map<string, typeof data.conversations>();
+		const ungrouped: typeof data.conversations = [];
+		for (const c of data.conversations) {
+			if (c.project_id) {
+				const arr = byProject.get(c.project_id) ?? [];
+				arr.push(c);
+				byProject.set(c.project_id, arr);
+			} else {
+				ungrouped.push(c);
+			}
+		}
+		return {
+			projects: (data.projects as Project[]).map((p) => ({
+				...p,
+				convs: byProject.get(p.id) ?? []
+			})),
+			ungrouped
+		};
+	});
+
+	// ─── Vue Code (WS4) — arborescence read-only du repo dans le panneau Arfa ─
+	type CodeNode = { name: string; path: string; type: 'dir' | 'file'; children?: CodeNode[] };
+	type CodeTree = { available: boolean; root: string; nodes: CodeNode[]; truncated: boolean };
+	let arfaTab = $state<'doc' | 'code'>('doc');
+	let codeOpen = $state(false);
+	let codeTree = $state<CodeTree | null>(null);
+	let codeFile = $state<{ path: string; content: string; lines: number } | null>(null);
+	let codeLoading = $state(false);
+	let codeError = $state<string | null>(null);
+	let codeExpanded = $state<Set<string>>(new Set());
+
 	// État de la session OpenAI Realtime (D8). `realtimeHandle` est null tant
 	// qu'aucune session WebRTC n'est ouverte ; il est posé par startRealtime()
 	// et nettoyé par stop(). `realtimeState` reflète la phase de connexion.
@@ -137,6 +180,8 @@
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 			const cm = localStorage.getItem('galaxia.chatMode');
 			if (cm === 'pro' || cm === 'free') chatMode = cm;
+			const cp = localStorage.getItem('galaxia.collapsedProjects');
+			if (cp) collapsedProjects = new Set(JSON.parse(cp) as string[]);
 		} catch {
 			/* localStorage indispo */
 		}
@@ -810,11 +855,12 @@
 		}
 	}
 
-	async function newConversation() {
+	async function newConversation(projectId: string | null = null) {
 		conversationId = null;
 		turns = [];
 		documents = [];
 		errorMsg = null;
+		pendingProjectId = projectId;
 		stopSpeaking();
 		history.replaceState({}, '', '/');
 	}
@@ -822,10 +868,15 @@
 	// ─── documents ─────────────────────────────────────────────────────────
 	async function ensureConversation(): Promise<string> {
 		if (conversationId) return conversationId;
-		const res = await fetch('/api/conversations', { method: 'POST' });
+		const res = await fetch('/api/conversations', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ project_id: pendingProjectId })
+		});
 		if (!res.ok) throw new Error(`Impossible de créer une conversation (HTTP ${res.status})`);
 		const { conversation } = await res.json();
 		conversationId = conversation.id;
+		pendingProjectId = null;
 		history.replaceState({}, '', `/?c=${conversation.id}`);
 		return conversation.id;
 	}
@@ -914,14 +965,135 @@
 
 	function openPreview(doc: DocChip) {
 		previewDoc = doc;
+		arfaTab = 'doc';
 	}
 
 	function closePreview() {
 		previewDoc = null;
+		if (codeOpen) arfaTab = 'code';
 	}
 
 	function onPreviewKey(e: KeyboardEvent) {
-		if (e.key === 'Escape') closePreview();
+		if (e.key === 'Escape') {
+			if (codeOpen && !previewDoc) closeCode();
+			else closePreview();
+		}
+	}
+
+	// ─── Projets (WS3) ───────────────────────────────────────────────────────
+	function persistCollapsed() {
+		try {
+			localStorage.setItem('galaxia.collapsedProjects', JSON.stringify([...collapsedProjects]));
+		} catch {
+			/* localStorage indispo */
+		}
+	}
+	function toggleProject(id: string) {
+		// Réassigne le Set pour déclencher la réactivité Svelte 5.
+		const next = new Set(collapsedProjects);
+		next.has(id) ? next.delete(id) : next.add(id);
+		collapsedProjects = next;
+		persistCollapsed();
+	}
+	async function submitNewProject() {
+		const name = newProjectName.trim();
+		if (!name) {
+			creatingProject = false;
+			return;
+		}
+		const res = await fetch('/api/projects', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ name })
+		});
+		newProjectName = '';
+		creatingProject = false;
+		if (res.ok) await invalidateAll();
+		else errorMsg = `Création du projet impossible (HTTP ${res.status})`;
+	}
+	async function renameProject(p: Project) {
+		const name = window.prompt('Renommer le projet', p.name)?.trim();
+		if (!name || name === p.name) return;
+		const res = await fetch('/api/projects', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ id: p.id, name })
+		});
+		if (res.ok) await invalidateAll();
+	}
+	async function deleteProject(p: Project) {
+		if (!window.confirm(`Supprimer le projet « ${p.name} » ? Ses conversations seront conservées (hors projet).`))
+			return;
+		const res = await fetch('/api/projects', {
+			method: 'DELETE',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ id: p.id })
+		});
+		if (res.ok) await invalidateAll();
+	}
+	async function moveConversation(convId: string, projectId: string | null) {
+		const res = await fetch('/api/conversations', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ id: convId, project_id: projectId })
+		});
+		if (res.ok) await invalidateAll();
+	}
+
+	// ─── Vue Code (WS4) ──────────────────────────────────────────────────────
+	function openCode() {
+		codeOpen = true;
+		arfaTab = 'code';
+		if (!codeTree) loadCodeTree();
+	}
+	function closeCode() {
+		codeOpen = false;
+		if (previewDoc) arfaTab = 'doc';
+	}
+	async function loadCodeTree() {
+		codeLoading = true;
+		codeError = null;
+		try {
+			const res = await fetch('/api/code');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			codeTree = await res.json();
+			if (!codeTree?.available) codeError = 'Vue Code indisponible (racine absente sur ce serveur).';
+		} catch (e) {
+			codeError = e instanceof Error ? e.message : String(e);
+		} finally {
+			codeLoading = false;
+		}
+	}
+	function toggleDir(path: string) {
+		const next = new Set(codeExpanded);
+		next.has(path) ? next.delete(path) : next.add(path);
+		codeExpanded = next;
+	}
+	async function openCodeFile(path: string) {
+		codeLoading = true;
+		codeError = null;
+		arfaTab = 'code';
+		codeOpen = true;
+		try {
+			const res = await fetch(`/api/code?file=${encodeURIComponent(path)}`);
+			const body = await res.json();
+			if (!res.ok || body.error) {
+				codeError = body.error ?? `HTTP ${res.status}`;
+				codeFile = null;
+			} else {
+				codeFile = { path: body.path, content: body.content, lines: body.lines };
+			}
+		} catch (e) {
+			codeError = e instanceof Error ? e.message : String(e);
+		} finally {
+			codeLoading = false;
+		}
+	}
+	// L'agent coder (mode Opus) édite les fichiers via MCP ; ce bouton resynchronise
+	// l'arbre + le fichier ouvert avec l'état réel du disque.
+	async function refreshCode() {
+		await loadCodeTree();
+		if (codeFile) await openCodeFile(codeFile.path);
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -961,25 +1133,85 @@
 	<title>{data.active?.title ?? 'Galaxia'}</title>
 </svelte:head>
 
-<div class="app" class:arfa-open={!!previewDoc}>
+<div class="app" class:arfa-open={!!previewDoc || codeOpen} class:code-wide={codeOpen && arfaTab === 'code'}>
 	<aside class="sidebar">
 		<div class="brand">
 			<span class="dot"></span>
 			<span>Galaxia</span>
 		</div>
-		<button class="new" onclick={newConversation}>+ Nouvelle conversation</button>
+		<div class="new-row">
+			<button class="new" onclick={() => newConversation()}>+ Nouvelle conversation</button>
+			<button
+				class="new-proj"
+				title="Nouveau projet"
+				onclick={() => {
+					creatingProject = true;
+					newProjectName = '';
+				}}>🗂️＋</button
+			>
+		</div>
+
+		{#if creatingProject}
+			<!-- svelte-ignore a11y_autofocus -->
+			<input
+				class="proj-input"
+				placeholder="Nom du projet…"
+				autofocus
+				bind:value={newProjectName}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') submitNewProject();
+					else if (e.key === 'Escape') {
+						creatingProject = false;
+						newProjectName = '';
+					}
+				}}
+				onblur={submitNewProject}
+			/>
+		{/if}
+
 		<nav class="convlist">
-			{#each data.conversations as conv (conv.id)}
-				<a
-					href="/?c={conv.id}"
-					class:active={conv.id === conversationId}
-					data-sveltekit-reload
-				>
+			{#each grouped.projects as proj (proj.id)}
+				<div class="proj">
+					<div class="proj-head">
+						<button
+							class="proj-toggle"
+							onclick={() => toggleProject(proj.id)}
+							title={collapsedProjects.has(proj.id) ? 'Déplier' : 'Replier'}
+						>
+							<span class="caret">{collapsedProjects.has(proj.id) ? '▸' : '▾'}</span>
+							<span class="proj-name">{proj.name}</span>
+							<span class="proj-count">{proj.convs.length}</span>
+						</button>
+						<button class="proj-act" title="Nouvelle conversation dans ce projet" onclick={() => newConversation(proj.id)}>＋</button>
+						<button class="proj-act" title="Renommer" onclick={() => renameProject(proj)}>✎</button>
+						<button class="proj-act" title="Supprimer le projet" onclick={() => deleteProject(proj)}>🗑</button>
+					</div>
+					{#if !collapsedProjects.has(proj.id)}
+						<div class="proj-convs">
+							{#each proj.convs as conv (conv.id)}
+								<a href="/?c={conv.id}" class:active={conv.id === conversationId} data-sveltekit-reload>
+									<span class="title">{conv.title}</span>
+									<span class="date">{fmtDate(conv.updated_at)}</span>
+								</a>
+							{/each}
+							{#if proj.convs.length === 0}
+								<p class="empty sub">Projet vide.</p>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/each}
+
+			{#if grouped.projects.length > 0 && grouped.ungrouped.length > 0}
+				<div class="convlist-sep">Hors projet</div>
+			{/if}
+			{#each grouped.ungrouped as conv (conv.id)}
+				<a href="/?c={conv.id}" class:active={conv.id === conversationId} data-sveltekit-reload>
 					<span class="title">{conv.title}</span>
 					<span class="date">{fmtDate(conv.updated_at)}</span>
 				</a>
 			{/each}
-			{#if data.conversations.length === 0}
+			{#if data.conversations.length === 0 && grouped.projects.length === 0}
 				<p class="empty">Aucune conversation pour l'instant.</p>
 			{/if}
 		</nav>
@@ -1011,8 +1243,31 @@
 
 	<main class="main">
 		<header>
-			<h1>{data.active?.title ?? 'Hey Galaxia, on parle ?'}</h1>
+			<div class="head-title">
+				<h1>{data.active?.title ?? 'Hey Galaxia, on parle ?'}</h1>
+				{#if data.active}
+					<select
+						class="proj-select"
+						title="Ranger cette conversation dans un projet"
+						value={data.active.project_id ?? ''}
+						onchange={(e) => moveConversation(data.active!.id, e.currentTarget.value || null)}
+					>
+						<option value="">— Hors projet —</option>
+						{#each grouped.projects as p (p.id)}
+							<option value={p.id}>{p.name}</option>
+						{/each}
+					</select>
+				{/if}
+			</div>
 			<div class="header-actions">
+				<button
+					class="voice-toggle"
+					class:on={codeOpen}
+					onclick={() => (codeOpen ? closeCode() : openCode())}
+					title="Vue Code — arborescence du projet Galaxia (lecture seule, l'agent édite)"
+				>
+					&lt;/&gt; Code
+				</button>
 				{#if voiceMode || listening || speaking || sending}
 					<span class="conv-state" class:listening class:speaking class:thinking={sending && !speaking}>
 						{#if speaking}
@@ -1319,26 +1574,107 @@
 		</div>
 	</main>
 
-	{#if previewDoc}
-		<aside class="arfa" aria-label="Artefact : {previewDoc.filename}">
+	{#if previewDoc || codeOpen}
+		<aside class="arfa" aria-label="Panneau artefacts et code">
 			<header class="arfa-head">
-				<span class="arfa-icon">{docIcon(previewDoc.mime_type)}</span>
-				<span class="arfa-name">{previewDoc.filename}</span>
-				<span class="arfa-meta">{fmtBytes(previewDoc.size)}</span>
-				<a
-					class="arfa-dl"
-					href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
-					target="_blank"
-					rel="noopener"
-					title="Ouvrir dans un nouvel onglet"
-				>↗</a>
-				<button class="arfa-close" onclick={closePreview} aria-label="Fermer le panneau">×</button>
+				<div class="arfa-tabs">
+					{#if previewDoc}
+						<button class="arfa-tab" class:active={arfaTab === 'doc'} onclick={() => (arfaTab = 'doc')}>
+							{docIcon(previewDoc.mime_type)} Doc
+						</button>
+					{/if}
+					<button class="arfa-tab" class:active={arfaTab === 'code'} onclick={openCode}>&lt;/&gt; Code</button>
+				</div>
+				<span class="arfa-spacer"></span>
+				{#if arfaTab === 'doc' && previewDoc}
+					<span class="arfa-meta">{fmtBytes(previewDoc.size)}</span>
+					<a
+						class="arfa-dl"
+						href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+						target="_blank"
+						rel="noopener"
+						title="Ouvrir dans un nouvel onglet">↗</a
+					>
+					<button class="arfa-close" onclick={closePreview} aria-label="Fermer le document">×</button>
+				{:else}
+					<button class="arfa-dl" onclick={refreshCode} title="Rafraîchir depuis le disque">⟳</button>
+					<button class="arfa-close" onclick={closeCode} aria-label="Fermer la vue Code">×</button>
+				{/if}
 			</header>
-			<iframe
-				class="arfa-iframe"
-				title={previewDoc.filename}
-				src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
-			></iframe>
+
+			{#if arfaTab === 'doc' && previewDoc}
+				<div class="arfa-subhead">
+					<span class="arfa-icon">{docIcon(previewDoc.mime_type)}</span>
+					<span class="arfa-name">{previewDoc.filename}</span>
+				</div>
+				<iframe
+					class="arfa-iframe"
+					title={previewDoc.filename}
+					src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+				></iframe>
+			{:else}
+				{#snippet tree(nodes: CodeNode[], depth: number)}
+					{#each nodes as node (node.path)}
+						{#if node.type === 'dir'}
+							<button
+								class="code-row dir"
+								style="--depth:{depth}"
+								onclick={() => toggleDir(node.path)}
+							>
+								<span class="caret">{codeExpanded.has(node.path) ? '▾' : '▸'}</span>
+								<span class="code-name">{node.name}</span>
+							</button>
+							{#if codeExpanded.has(node.path) && node.children}
+								{@render tree(node.children, depth + 1)}
+							{/if}
+						{:else}
+							<button
+								class="code-row file"
+								class:active={codeFile?.path === node.path}
+								style="--depth:{depth}"
+								onclick={() => openCodeFile(node.path)}
+							>
+								<span class="code-name">{node.name}</span>
+							</button>
+						{/if}
+					{/each}
+				{/snippet}
+
+				<div class="code-pane">
+					<div class="code-tree">
+						{#if codeLoading && !codeTree}
+							<p class="empty">Chargement…</p>
+						{/if}
+						{#if codeError && !codeTree?.available}
+							<p class="empty err">{codeError}</p>
+						{/if}
+						{#if codeTree?.available}
+							<div class="code-root">{codeTree.root}</div>
+							{@render tree(codeTree.nodes, 0)}
+							{#if codeTree.truncated}
+								<p class="empty sub">Arbre tronqué (trop de fichiers).</p>
+							{/if}
+						{/if}
+					</div>
+					<div class="code-file">
+						{#if codeError && codeTree?.available}
+							<p class="empty err">{codeError}</p>
+						{:else if codeFile}
+							<div class="code-file-head">
+								<span class="cf-path">{codeFile.path}</span>
+								<span class="cf-meta">{codeFile.lines} lignes</span>
+							</div>
+							<div class="code-scroll">
+								{#each codeFile.content.split('\n') as line, i}
+									<div class="cl"><span class="ln">{i + 1}</span><span class="lc">{line}</span></div>
+								{/each}
+							</div>
+						{:else}
+							<p class="empty">Sélectionne un fichier à gauche.</p>
+						{/if}
+					</div>
+				</div>
+			{/if}
 		</aside>
 	{/if}
 </div>
@@ -1366,6 +1702,9 @@
 	}
 	.app.arfa-open {
 		grid-template-columns: var(--g-sidebar-w) 1fr var(--g-arfa-w);
+	}
+	.app.arfa-open.code-wide {
+		grid-template-columns: var(--g-sidebar-w) 1fr var(--g-arfa-w-wide);
 	}
 
 	.sidebar {
@@ -1445,6 +1784,122 @@
 		color: #555;
 		font-size: 0.85rem;
 	}
+	/* — Projets (WS3) — */
+	.new-row {
+		display: flex;
+		gap: 0.4rem;
+	}
+	.new-row .new {
+		flex: 1;
+	}
+	.new-proj {
+		background: var(--g-primary-15);
+		color: #ddd;
+		border: 1px solid var(--g-primary-30);
+		border-radius: 8px;
+		padding: 0 0.6rem;
+		cursor: pointer;
+		font-size: 0.8rem;
+		white-space: nowrap;
+	}
+	.new-proj:hover {
+		background: var(--g-primary-25);
+	}
+	.proj-input {
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-border-strong);
+		color: var(--g-fg);
+		border-radius: 6px;
+		padding: 0.45rem 0.6rem;
+		font-size: 0.85rem;
+		outline: none;
+	}
+	.proj-input:focus {
+		border-color: var(--g-primary);
+	}
+	.proj {
+		display: flex;
+		flex-direction: column;
+	}
+	.proj-head {
+		display: flex;
+		align-items: center;
+		gap: 0.1rem;
+		border-radius: 6px;
+	}
+	.proj-head:hover {
+		background: var(--g-primary-08);
+	}
+	.proj-toggle {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		background: none;
+		border: none;
+		color: var(--g-fg-muted);
+		cursor: pointer;
+		padding: 0.4rem 0.4rem;
+		font-size: 0.78rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		text-align: left;
+	}
+	.proj-toggle .caret {
+		color: var(--g-fg-faint);
+		font-size: 0.7rem;
+		flex-shrink: 0;
+	}
+	.proj-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		flex: 1;
+		font-weight: 600;
+	}
+	.proj-count {
+		color: var(--g-fg-faint);
+		font-size: 0.7rem;
+		flex-shrink: 0;
+	}
+	.proj-act {
+		background: none;
+		border: none;
+		color: var(--g-fg-faint);
+		cursor: pointer;
+		padding: 0.25rem 0.3rem;
+		font-size: 0.75rem;
+		opacity: 0;
+		transition: opacity 0.12s;
+	}
+	.proj-head:hover .proj-act {
+		opacity: 1;
+	}
+	.proj-act:hover {
+		color: var(--g-primary-light);
+	}
+	.proj-convs {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		padding-left: 0.55rem;
+		margin-left: 0.35rem;
+		border-left: 1px solid var(--g-primary-15);
+	}
+	.convlist-sep {
+		padding: 0.5rem 0.5rem 0.2rem;
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--g-fg-faint);
+		font-weight: 600;
+	}
+	.empty.sub {
+		font-size: 0.78rem;
+		padding: 0.3rem 0.5rem;
+	}
+
 	.sidebar-extras {
 		padding-top: 0.5rem;
 		border-top: 1px solid var(--g-primary-15);
@@ -2101,10 +2556,188 @@
 		background: var(--g-bg);
 	}
 
+	/* — Onglets Arfa (Doc / Code) — */
+	.arfa-tabs {
+		display: flex;
+		gap: 0.25rem;
+	}
+	.arfa-tab {
+		background: none;
+		border: 1px solid transparent;
+		color: var(--g-fg-muted);
+		padding: 0.35rem 0.7rem;
+		border-radius: var(--g-radius-sm);
+		cursor: pointer;
+		font-size: 0.82rem;
+		font-family: var(--g-font);
+	}
+	.arfa-tab:hover {
+		background: var(--g-primary-08);
+		color: #fff;
+	}
+	.arfa-tab.active {
+		background: var(--g-primary-20);
+		border-color: var(--g-primary-30);
+		color: #fff;
+	}
+	.arfa-spacer {
+		flex: 1;
+	}
+	.arfa-subhead {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		border-bottom: 1px solid var(--g-primary-15);
+		font-size: 0.85rem;
+	}
+
+	/* — Vue Code (WS4) : tree à gauche, fichier à droite — */
+	.code-pane {
+		flex: 1;
+		display: grid;
+		grid-template-columns: minmax(160px, 240px) 1fr;
+		min-height: 0;
+		background: var(--g-bg);
+	}
+	.code-tree {
+		overflow: auto;
+		border-right: 1px solid var(--g-primary-15);
+		padding: 0.4rem 0.25rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+	.code-root {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--g-fg-faint);
+		padding: 0.2rem 0.5rem 0.4rem;
+		font-weight: 600;
+	}
+	.code-row {
+		display: flex;
+		align-items: center;
+		gap: 0.3rem;
+		background: none;
+		border: none;
+		color: var(--g-fg-muted);
+		cursor: pointer;
+		font-size: 0.8rem;
+		text-align: left;
+		padding: 0.25rem 0.4rem;
+		padding-left: calc(0.4rem + var(--depth, 0) * 0.8rem);
+		border-radius: 5px;
+		width: 100%;
+		font-family: var(--g-font-mono);
+	}
+	.code-row:hover {
+		background: var(--g-primary-08);
+		color: #fff;
+	}
+	.code-row.file.active {
+		background: var(--g-primary-20);
+		color: #fff;
+	}
+	.code-row .caret {
+		color: var(--g-fg-faint);
+		font-size: 0.65rem;
+		flex-shrink: 0;
+	}
+	.code-row.file {
+		padding-left: calc(1.4rem + var(--depth, 0) * 0.8rem);
+	}
+	.code-name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.code-file {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		overflow: hidden;
+	}
+	.code-file-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		padding: 0.4rem 0.8rem;
+		border-bottom: 1px solid var(--g-primary-15);
+		font-family: var(--g-font-mono);
+		font-size: 0.75rem;
+	}
+	.cf-path {
+		color: var(--g-fg);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.cf-meta {
+		color: var(--g-fg-faint);
+		flex-shrink: 0;
+	}
+	.code-scroll {
+		flex: 1;
+		overflow: auto;
+		padding: 0.5rem 0;
+		font-family: var(--g-font-mono);
+		font-size: 0.78rem;
+		line-height: 1.5;
+	}
+	.cl {
+		display: flex;
+		min-height: 1.5em;
+	}
+	.cl:hover {
+		background: var(--g-primary-08);
+	}
+	.ln {
+		flex-shrink: 0;
+		width: 3rem;
+		text-align: right;
+		padding-right: 0.8rem;
+		color: var(--g-fg-dim);
+		user-select: none;
+	}
+	.lc {
+		white-space: pre;
+		color: var(--g-fg);
+		padding-right: 1rem;
+	}
+	.empty.err {
+		color: var(--g-state-error);
+	}
+
+	/* — Header : titre + sélecteur de projet — */
+	.head-title {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		min-width: 0;
+	}
+	.proj-select {
+		background: var(--g-surface-raised);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-border);
+		border-radius: var(--g-radius-sm);
+		padding: 0.25rem 0.4rem;
+		font-size: 0.78rem;
+		cursor: pointer;
+		max-width: 180px;
+	}
+	.proj-select:hover {
+		border-color: var(--g-border-strong);
+		color: #fff;
+	}
+
 	@media (max-width: 1100px) {
 		/* Sous 1100px le panneau Arfa passe en overlay flottant plutôt que
 		   de comprimer le chat. */
-		.app.arfa-open {
+		.app.arfa-open,
+		.app.arfa-open.code-wide {
 			grid-template-columns: var(--g-sidebar-w) 1fr;
 		}
 		.arfa {
@@ -2114,6 +2747,9 @@
 			bottom: 0;
 			width: min(var(--g-arfa-w), 92vw);
 			z-index: 100;
+		}
+		.app.code-wide .arfa {
+			width: min(var(--g-arfa-w-wide), 96vw);
 		}
 	}
 </style>
