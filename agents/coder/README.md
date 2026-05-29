@@ -65,6 +65,26 @@ Dry-run mode (do everything **except** `git push` and `gh pr create`):
 GALAXIA_CODER_DRY_RUN=1 node index.mjs
 ```
 
+### Tester la boucle curée
+
+Pour vérifier le chemin complet Telegram → digest → `pending/` → coder sans passer par Telegram :
+
+1. Déposez un fichier `.md` de test dans `~/.claude/galaxia/galaxia-updates/pending/`, par exemple `2026-05-29-test.md`, avec un contenu de proposition valide (titre, contexte, fichiers concernés).
+2. Lancez un run manuel du service :
+   ```bash
+   sudo systemctl start galaxia-coder.service
+   ```
+3. Vérifiez que le fichier a migré vers `applied/` (signe que le run l'a bien réclamé) :
+   ```bash
+   ls ~/.claude/galaxia/galaxia-updates/applied/
+   ```
+4. Vérifiez qu'une PR a été ouverte sur `Jeffchoux/galaxia_os` :
+   ```bash
+   journalctl -u galaxia-coder --since "1 min ago" | grep pr_url
+   ```
+
+> Note : si `GALAXIA_CODER_DRY_RUN=1` est actif, le run consomme la proposition mais n'ouvre pas de PR. Ôter la variable pour un test bout en bout complet.
+
 ## Environment variables
 
 All optional unless noted.
