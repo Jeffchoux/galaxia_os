@@ -1,6 +1,6 @@
 # agents/coder — Galaxia daily improvement agent
 
-The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:00 UTC, this agent reads two sources — **curated proposals Jeff sent over Telegram** (priority) and the **auto-collected IA veille** (secondary) — picks up to 3 actionable items, and opens improvement PRs on `Jeffchoux/galaxia_os`. Because it's the first, it also acts as the **reference for token economics** that every future Galaxia agent should copy.
+The **first paying consumer of the Anthropic API in Galaxia.** Once a day at 07:00 UTC, this agent reads two sources — **curated proposals Jeff sent over Telegram** (priority) and the **auto-collected IA veille** (secondary) — picks the highest-leverage item (one PR per run by default, see `GALAXIA_CODER_MAX_PROPOSALS`), and opens an improvement PR on `Jeffchoux/galaxia_os`. Because it's the first, it also acts as the **reference for token economics** that every future Galaxia agent should copy.
 
 ## The two input sources
 
@@ -77,6 +77,7 @@ All optional unless noted.
 | `GALAXIA_CODER_MAX_TURNS`         | `40`                                                 | Hard cap on agent loop iterations.                                                              |
 | `GALAXIA_CODER_MAX_ITEMS`         | `30`                                                 | Items kept after the keyword pre-filter (the agent sees at most this many).                     |
 | `GALAXIA_CODER_MAX_USD_PER_RUN`   | `1.00`                                               | Logged + flagged in the report `notes` when crossed. Not a hard kill (the SDK is already running). |
+| `GALAXIA_CODER_MAX_PROPOSALS`     | `1`                                                  | How many PRs one run opens. Default 1 keeps the run well under `maxTurns`. Don't exceed 3 without bumping the schema cap in `schema.mjs`. |
 | `GALAXIA_CODER_GPG_KEY_ID`        | unset                                                | If set, commits in the clone are signed with that GPG key.                                      |
 | `GALAXIA_VEILLE_DIR`              | `/home/galaxia/galaxia-project/docs/veille`          | Where to look for the day's report.                                                              |
 | `GALAXIA_REPO_URL`                | `git@github.com:Jeffchoux/galaxia_os.git`            | Override for forks / testing.                                                                    |
@@ -133,6 +134,8 @@ Runs are 24 h apart and the cache TTL is at most 1 h — caching does **not** he
 ### 5. Cap the loop
 
 `maxTurns: 40` is a hard ceiling. The agent stops earlier when it's done. Even if it goes off the rails, the loop can't burn unbounded tokens.
+
+`GALAXIA_CODER_MAX_PROPOSALS` (default **1**) is the more important lever in practice: it caps how many PRs a single run opens. A 3-PR run on a busy veille was hitting the 40-turn ceiling *mid-third-PR* and dying before it could emit its `<report>` — the run got marked "failed" even though it had already opened real PRs, and it left orphan branches behind. One focused PR per day is plenty at this cadence, finishes in ~10–15 turns, and keeps cost near ~$0.30. The task line in the user prompt is built from this value and tells the agent to **emit the report and stop the moment the cap is reached**.
 
 ### 6. Track and threshold cost per run
 
