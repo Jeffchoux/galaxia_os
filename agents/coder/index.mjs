@@ -2,9 +2,11 @@
 //
 // Galaxia coder — daily entrypoint.
 //
-//   1. Locates today's veille report.
-//   2. Pre-filters the report to PME-actionable items only (saves API tokens).
-//   3. Bails out cheaply if nothing is worth proposing today (no API call).
+//   1. Claims curated proposals from Jeff's inbox (galaxia-updates/pending/),
+//      moving each atomically to applied/ — these are pre-vetted by the daily
+//      digest and take priority over the veille.
+//   2. Locates today's veille report and pre-filters it to PME-actionable items.
+//   3. Bails out cheaply if there is neither a proposal nor a veille item (no API call).
 //   4. Clones the repo to a fresh /tmp working tree.
 //   5. Configures git (signing, identity) on the local checkout only.
 //   6. Invokes the Claude Agent SDK with a deterministic system prompt body.
@@ -22,7 +24,14 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync, mkdtempSync } from "node:fs";
+import {
+  readFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  mkdirSync,
+} from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -40,6 +49,17 @@ const DRY_RUN = process.env.GALAXIA_CODER_DRY_RUN === "1";
 const MAX_TURNS = Number(process.env.GALAXIA_CODER_MAX_TURNS ?? 40);
 const MAX_ITEMS = Number(process.env.GALAXIA_CODER_MAX_ITEMS ?? 30);
 const MAX_USD = Number(process.env.GALAXIA_CODER_MAX_USD_PER_RUN ?? 1.00);
+
+// Curated proposals from Jeff. The daily digest (process_inbox.py) transcribes
+// the TikToks/tweets Jeff sends over Telegram, categorizes each item, and writes
+// the ones it judges to be concrete Galaxia improvements as markdown files in
+// `pending/`. Those files live OUTSIDE this repo (under ~/.claude/galaxia/ on
+// the mother machine) — both paths are overridable for tests and for filles
+// that don't run the digest at all.
+const PENDING_DIR = process.env.GALAXIA_PENDING_DIR
+  ?? "/home/galaxia/.claude/galaxia/galaxia-updates/pending";
+const APPLIED_DIR = process.env.GALAXIA_APPLIED_DIR
+  ?? "/home/galaxia/.claude/galaxia/galaxia-updates/applied";
 
 // Mots-clés positifs (signal PME). Tout item touchant l'un de ces motifs
 // passe le pré-filtre. Si rien ne matche, l'agent ne tourne pas.
@@ -101,33 +121,70 @@ function prefilterVeille(body) {
   return { total: items.length, kept };
 }
 
+// Claim every pending proposal by moving it pending/ -> applied/ BEFORE the
+// agent runs. rename(2) is atomic within a single filesystem, so a re-triggered
+// or concurrent run can never pick the same file twice (anti-rejeu). Trade-off:
+// a crash after claiming but before the PR leaves a proposal in applied/ with no
+// PR. We accept that — the proposal also lives in the day's brief and can be
+// re-dropped — because opening a DUPLICATE PR is the worse failure. Returns the
+// claimed proposals (filename + raw markdown body). Empty (and inert) when
+// pending/ is absent, e.g. on a fille that doesn't run the digest.
+function claimPendingProposals() {
+  if (!existsSync(PENDING_DIR)) return [];
+  mkdirSync(APPLIED_DIR, { recursive: true });
+  const claimed = [];
+  for (const name of readdirSync(PENDING_DIR).filter((f) => f.endsWith(".md")).sort()) {
+    const dst = join(APPLIED_DIR, name);
+    try {
+      renameSync(join(PENDING_DIR, name), dst); // atomic claim
+    } catch (err) {
+      if (err.code === "ENOENT") continue; // already claimed by a concurrent run
+      throw err;
+    }
+    claimed.push({ name, body: readFileSync(dst, "utf8") });
+  }
+  return claimed;
+}
+
 async function main() {
   const date = today();
-  const veillePath = join(VEILLE_DIR, `${date}.md`);
-  if (!existsSync(veillePath)) {
-    log(`Veille report missing for ${date}: ${veillePath}`);
-    log("Nothing to propose; exiting cleanly.");
-    return 0;
-  }
-  const veille = readFileSync(veillePath, "utf8");
-  if (veille.trim().length < 200) {
-    log(`Veille report exists but is shorter than 200 chars — skipping.`);
-    return 0;
-  }
 
-  const { total, kept } = prefilterVeille(veille);
-  log(`Veille pre-filter: ${kept.length}/${total} items kept after keyword scan.`);
-  if (kept.length === 0) {
-    log("No PME-actionable items today. Skipping the API call entirely.");
-    return 0;
-  }
-  // The user prompt carries the filtered items. The full veille is NOT sent.
-  const filteredBody = kept.join("\n\n");
-
+  // Fail fast before we consume anything: no key means we can't run, and we
+  // must not move proposals out of pending/ only to bail.
   if (!process.env.ANTHROPIC_API_KEY) {
     log("ANTHROPIC_API_KEY missing. Refusing to run.");
     return 1;
   }
+
+  // Source 1 (priority): curated proposals from Jeff, claimed atomically.
+  const proposals = claimPendingProposals();
+  if (proposals.length) {
+    log(`Claimed ${proposals.length} curated proposal(s) from ${PENDING_DIR}.`);
+  }
+
+  // Source 2 (secondary): the auto-collected veille. May be absent — that's
+  // fine as long as we have at least one curated proposal to act on.
+  let kept = [];
+  let total = 0;
+  const veillePath = join(VEILLE_DIR, `${date}.md`);
+  if (existsSync(veillePath)) {
+    const veille = readFileSync(veillePath, "utf8");
+    if (veille.trim().length < 200) {
+      log("Veille report exists but is shorter than 200 chars — skipping veille.");
+    } else {
+      ({ total, kept } = prefilterVeille(veille));
+      log(`Veille pre-filter: ${kept.length}/${total} items kept after keyword scan.`);
+    }
+  } else {
+    log(`Veille report missing for ${date}: ${veillePath}`);
+  }
+
+  if (proposals.length === 0 && kept.length === 0) {
+    log("No curated proposals and no PME-actionable veille items today. Skipping the API call entirely.");
+    return 0;
+  }
+  // The user prompt carries the filtered items. The full veille is NOT sent.
+  const filteredBody = kept.join("\n\n");
 
   const workRoot = mkdtempSync(join(tmpdir(), `galaxia-coder-${date}-`));
   const repoPath = join(workRoot, "galaxia_os");
@@ -151,6 +208,34 @@ async function main() {
   // SDK's automatic prompt-cache hits on every turn after the first.
   const systemPromptBody = readFileSync(join(__dirname, "system-prompt.md"), "utf8");
 
+  const curatedSection = proposals.length
+    ? [
+        `## Curated proposals from Jeff (PRIORITY — handle these first)`,
+        ``,
+        `Jeff sent these over Telegram and the daily digest already categorized them as concrete Galaxia improvements. They are pre-vetted: do NOT re-filter them, and prioritize them over the veille items below. Each block is one proposal (title, source, context, proposed change, files affected). If, after reading the repo, one turns out not to map to a real code/doc change, reject it with a reason in the report rather than forcing a PR.`,
+        ``,
+        proposals
+          .map((p, i) => `### Curated proposal ${i + 1}\n\n${p.body.trim()}`)
+          .join("\n\n---\n\n"),
+        ``,
+      ].join("\n")
+    : ``;
+
+  const veilleSection = kept.length
+    ? [
+        `## Daily veille — filtered (${kept.length} items out of ${total})`,
+        ``,
+        `The orchestrator already removed items that don't carry PME-relevant signal. You don't need to filter further; pick from below.`,
+        ``,
+        filteredBody,
+        ``,
+      ].join("\n")
+    : ``;
+
+  const taskLine = proposals.length
+    ? `Pick up to 3 actionable items total, **always prioritizing the curated proposals above** the veille list. For each chosen item, follow the workflow in the system prompt and open a PR. End your final assistant turn with the <report>...</report> block.`
+    : `Pick 1–3 actionable items from the filtered list above (or return an empty proposals array with reasons if none qualifies). For each chosen item, follow the workflow in the system prompt and open a PR. End your final assistant turn with the <report>...</report> block.`;
+
   const userPrompt = [
     `Today is ${date} (UTC).`,
     `Working tree (already cloned and on \`main\`): ${repoPath}.`,
@@ -159,15 +244,11 @@ async function main() {
       ? `DRY_RUN=1 — perform git operations locally but skip \`git push\` and \`gh pr create\`. Still produce the <report>.`
       : ``,
     ``,
-    `## Daily veille — filtered (${kept.length} items out of ${total})`,
-    ``,
-    `The orchestrator already removed items that don't carry PME-relevant signal. You don't need to filter further; pick from below.`,
-    ``,
-    filteredBody,
-    ``,
+    curatedSection,
+    veilleSection,
     `## Your task`,
     ``,
-    `Pick 1–3 actionable items from the filtered list above (or return an empty proposals array with reasons if none qualifies). For each chosen item, follow the workflow in the system prompt and open a PR. End your final assistant turn with the <report>...</report> block.`,
+    taskLine,
   ].filter(Boolean).join("\n");
 
   log(`Invoking Claude Agent SDK — model=${MODEL}, maxTurns=${MAX_TURNS}, dryRun=${DRY_RUN}`);
