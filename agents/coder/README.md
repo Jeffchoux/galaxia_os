@@ -151,6 +151,7 @@ Runs are 24 h apart and the cache TTL is at most 1 h — caching does **not** he
 |----------------------------------------|--------------------------------------------------------------------------------------------------------------|
 | Exit 0, no PRs                         | Veille file missing/short, or every item rejected by the pre-filter, or the agent itself rejected them all.  |
 | Exit 1, `ANTHROPIC_API_KEY missing`    | Wizard hasn't run, or systemd `EnvironmentFile` is wrong.                                                    |
+| Branch pushed, but no PR created      | `GH_TOKEN` is absent from `/opt/galaxia/config/.env`. Under `ProtectSystem=strict`, systemd can't read `~/.config/gh/`. Add `GH_TOKEN=ghp_…` (scope `public_repo`) to that file and `sudo systemctl daemon-reload`. |
 | Exit 2, `no <report> block`            | Agent hit `maxTurns` or crashed mid-run. Inspect `journalctl -u galaxia-coder` for context.                  |
 | Exit 2, schema validation failure      | Agent's report JSON is malformed. Same — read the journal.                                                   |
 | PR opened but CI fails immediately     | Agent broke something. Cost: one human review-and-close. Document the failure in this README's "Known quirks" when it happens. |
