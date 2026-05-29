@@ -28,6 +28,14 @@ const DEFAULT_PRICING: ModelPricing = {
 
 // Tarifs au 2026-05-24 (à raffraîchir si Anthropic publie des changements).
 const PRICING: Record<string, ModelPricing> = {
+	// Opus 4.8 (sorti 2026-05-28) : Anthropic annonce un prix identique à 4.7.
+	// On reprend donc la même grille. À re-vérifier sur la page pricing officielle.
+	'claude-opus-4-8': {
+		input: 15,
+		output: 75,
+		cache_create_multiplier: 1.25,
+		cache_read_multiplier: 0.1
+	},
 	'claude-opus-4-7': {
 		input: 15,
 		output: 75,
