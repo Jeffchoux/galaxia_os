@@ -49,6 +49,13 @@ const DRY_RUN = process.env.GALAXIA_CODER_DRY_RUN === "1";
 const MAX_TURNS = Number(process.env.GALAXIA_CODER_MAX_TURNS ?? 40);
 const MAX_ITEMS = Number(process.env.GALAXIA_CODER_MAX_ITEMS ?? 30);
 const MAX_USD = Number(process.env.GALAXIA_CODER_MAX_USD_PER_RUN ?? 1.00);
+// Hard cap on how many PRs a single run opens. Default 1: a daily cadence makes
+// one focused, reviewable PR per run plenty, and — crucially — it keeps the run
+// well under MAX_TURNS. A 3-PR run on a full veille was hitting the 40-turn cap
+// and dying before it could emit its <report> (the run looked "failed" even
+// though PRs were created). The report schema independently caps the array at 3,
+// so don't raise this above 3 without bumping schema.mjs too.
+const MAX_PROPOSALS = Number(process.env.GALAXIA_CODER_MAX_PROPOSALS ?? 1);
 
 // Curated proposals from Jeff. The daily digest (process_inbox.py) transcribes
 // the TikToks/tweets Jeff sends over Telegram, categorizes each item, and writes
@@ -232,9 +239,12 @@ async function main() {
       ].join("\n")
     : ``;
 
+  const capPhrase = MAX_PROPOSALS === 1
+    ? `exactly ONE PR — the single highest-leverage item`
+    : `up to ${MAX_PROPOSALS} PRs`;
   const taskLine = proposals.length
-    ? `Pick up to 3 actionable items total, **always prioritizing the curated proposals above** the veille list. For each chosen item, follow the workflow in the system prompt and open a PR. End your final assistant turn with the <report>...</report> block.`
-    : `Pick 1–3 actionable items from the filtered list above (or return an empty proposals array with reasons if none qualifies). For each chosen item, follow the workflow in the system prompt and open a PR. End your final assistant turn with the <report>...</report> block.`;
+    ? `Open ${capPhrase} this run, **always prioritizing the curated proposals above** the veille list. As soon as you have opened the capped number of PR(s), STOP starting new work, record the rest as rejected (with reasons), and emit the <report>...</report> block as your final assistant turn. Do not exceed the cap — it protects the turn budget.`
+    : `Open ${capPhrase} from the filtered list above (or return an empty proposals array with reasons if nothing qualifies). As soon as you have opened the capped number of PR(s), STOP starting new work, record the rest as rejected (with reasons), and emit the <report>...</report> block as your final assistant turn. Do not exceed the cap — it protects the turn budget.`;
 
   const userPrompt = [
     `Today is ${date} (UTC).`,
