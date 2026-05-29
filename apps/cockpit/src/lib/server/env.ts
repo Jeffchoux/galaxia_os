@@ -14,7 +14,9 @@ export const getSessionSecret = () => required('SESSION_SECRET');
 // absent, et toutes les conversations existantes lui sont rattachées par migration.
 // Pré-requis pour ouvrir le cockpit à plus d'un utilisateur (Sprint 2 multi-user).
 export const getAdminEmail = () => required('ADMIN_EMAIL');
-export const getModel = () => env.COCKPIT_MODEL ?? 'claude-opus-4-7';
+// Décision D3 : Sonnet par défaut (rapport qualité/coût optimal pour une PME).
+// Opus reste disponible via COCKPIT_MODEL=claude-opus-4-8 dans le .env.
+export const getModel = () => env.COCKPIT_MODEL ?? 'claude-sonnet-4-6';
 export const getDbPath = () => env.COCKPIT_DB_PATH ?? './data/cockpit.db';
 // Briefs : par défaut on lit ceux produits par le pipeline digest de la galaxie
 // mère (côté OpenJeff). Pour les filles PME, à pointer vers leur propre dir.
