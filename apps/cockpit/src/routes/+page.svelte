@@ -2,6 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { onMount, tick } from 'svelte';
 	import type { PageData } from './$types';
+	import { highlightCode } from '$lib/highlight';
 
 	interface Props {
 		data: PageData;
@@ -966,6 +967,7 @@
 	function openPreview(doc: DocChip) {
 		previewDoc = doc;
 		arfaTab = 'doc';
+		loadDocInline(doc);
 	}
 
 	function closePreview() {
@@ -1094,6 +1096,41 @@
 	async function refreshCode() {
 		await loadCodeTree();
 		if (codeFile) await openCodeFile(codeFile.path);
+	}
+
+	// Colonne de numéros de ligne pour un bloc de code (alignée par CSS, pas de wrap).
+	function lineNumbers(s: string): string {
+		const n = s.length === 0 ? 1 : s.split('\n').length;
+		return Array.from({ length: n }, (_, i) => i + 1).join('\n');
+	}
+
+	// ─── Rendu inline du document dans l'onglet Doc (refinement WS) ──────────
+	// PDF / images / markdown → iframe (le markdown reste rendu côté serveur dans
+	// une iframe sandboxée, cf. /api/documents/[id] : pas d'HTML arbitraire injecté
+	// dans l'origine du cockpit). Code / texte → rendu inline coloré (échappé).
+	let docInline = $state<{ content: string; filename: string } | null>(null);
+	let docInlineLoading = $state(false);
+	function docUsesIframe(doc: DocChip): boolean {
+		const mt = doc.mime_type;
+		const isMd = mt.includes('markdown') || doc.filename.toLowerCase().endsWith('.md');
+		return mt === 'application/pdf' || mt.startsWith('image/') || isMd;
+	}
+	async function loadDocInline(doc: DocChip) {
+		docInline = null;
+		if (docUsesIframe(doc)) return; // chemin iframe
+		docInlineLoading = true;
+		try {
+			const res = await fetch(
+				`/api/documents/${doc.id}?conversation_id=${conversationId}&raw=1`
+			);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const body = await res.json();
+			docInline = { content: body.content ?? '', filename: doc.filename };
+		} catch {
+			docInline = null; // on retombera sur l'iframe en cas d'échec
+		} finally {
+			docInlineLoading = false;
+		}
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -1602,16 +1639,36 @@
 				{/if}
 			</header>
 
+			{#snippet codeBlock(content: string, path: string)}
+				<div class="code-scroll">
+					<pre class="gutter" aria-hidden="true">{lineNumbers(content)}</pre>
+					<pre class="code-block"><code>{@html highlightCode(content, path)}</code></pre>
+				</div>
+			{/snippet}
+
 			{#if arfaTab === 'doc' && previewDoc}
 				<div class="arfa-subhead">
 					<span class="arfa-icon">{docIcon(previewDoc.mime_type)}</span>
 					<span class="arfa-name">{previewDoc.filename}</span>
 				</div>
-				<iframe
-					class="arfa-iframe"
-					title={previewDoc.filename}
-					src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
-				></iframe>
+				{#if docUsesIframe(previewDoc)}
+					<iframe
+						class="arfa-iframe"
+						title={previewDoc.filename}
+						src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+					></iframe>
+				{:else if docInlineLoading}
+					<p class="empty">Chargement…</p>
+				{:else if docInline}
+					{@render codeBlock(docInline.content, docInline.filename)}
+				{:else}
+					<!-- échec du chargement inline : repli sur l'iframe -->
+					<iframe
+						class="arfa-iframe"
+						title={previewDoc.filename}
+						src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+					></iframe>
+				{/if}
 			{:else}
 				{#snippet tree(nodes: CodeNode[], depth: number)}
 					{#each nodes as node (node.path)}
@@ -1664,11 +1721,7 @@
 								<span class="cf-path">{codeFile.path}</span>
 								<span class="cf-meta">{codeFile.lines} lignes</span>
 							</div>
-							<div class="code-scroll">
-								{#each codeFile.content.split('\n') as line, i}
-									<div class="cl"><span class="ln">{i + 1}</span><span class="lc">{line}</span></div>
-								{/each}
-							</div>
+							{@render codeBlock(codeFile.content, codeFile.path)}
 						{:else}
 							<p class="empty">Sélectionne un fichier à gauche.</p>
 						{/if}
@@ -2682,30 +2735,61 @@
 	.code-scroll {
 		flex: 1;
 		overflow: auto;
+		display: flex;
+		align-items: flex-start;
 		padding: 0.5rem 0;
+		background: var(--g-bg);
 		font-family: var(--g-font-mono);
 		font-size: 0.78rem;
 		line-height: 1.5;
 	}
-	.cl {
-		display: flex;
-		min-height: 1.5em;
-	}
-	.cl:hover {
-		background: var(--g-primary-08);
-	}
-	.ln {
+	/* Gutter de numéros de ligne : collant à gauche pour rester visible pendant
+	   le scroll horizontal. Pas de wrap → 1 ligne source = 1 ligne affichée. */
+	.code-scroll .gutter {
+		position: sticky;
+		left: 0;
 		flex-shrink: 0;
-		width: 3rem;
+		margin: 0;
+		padding: 0 0.8rem 0 0.6rem;
 		text-align: right;
-		padding-right: 0.8rem;
 		color: var(--g-fg-dim);
+		background: var(--g-bg);
 		user-select: none;
+		white-space: pre;
+		font: inherit;
 	}
-	.lc {
+	.code-scroll .code-block {
+		margin: 0;
+		flex: 1;
+		min-width: 0;
 		white-space: pre;
 		color: var(--g-fg);
 		padding-right: 1rem;
+		font: inherit;
+	}
+	.code-scroll .code-block code {
+		font: inherit;
+		background: none;
+	}
+	/* Tokens (coloration zéro-dép, cf. $lib/highlight.ts) */
+	:global(.tok-comment) {
+		color: var(--g-fg-faint);
+		font-style: italic;
+	}
+	:global(.tok-string) {
+		color: #9ad29a;
+	}
+	:global(.tok-keyword) {
+		color: var(--g-primary-light);
+	}
+	:global(.tok-type) {
+		color: #7dd3fc;
+	}
+	:global(.tok-number) {
+		color: #fbbf24;
+	}
+	:global(.tok-tag) {
+		color: #f0abfc;
 	}
 	.empty.err {
 		color: var(--g-state-error);

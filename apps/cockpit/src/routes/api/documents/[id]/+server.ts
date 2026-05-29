@@ -43,6 +43,14 @@ export const GET: RequestHandler = ({ params, url, locals }) => {
 	const doc = getDocument(params.id, locals.user.id);
 	if (!doc || doc.conversation_id !== convId) throw error(404, 'document not found');
 
+	// Mode brut (?raw=1) : renvoie le texte du document en JSON pour un rendu
+	// inline côté client (onglet Doc du panneau Arfa). Réservé au texte/code —
+	// les binaires (PDF, images) restent servis en natif via l'iframe.
+	if (url.searchParams.get('raw')) {
+		if (doc.content_text === null) throw error(415, 'document binaire');
+		return json({ filename: doc.filename, mime_type: doc.mime_type, content: doc.content_text });
+	}
+
 	// Binaires (PDF + images) → on sert le contenu natif, le browser sait afficher
 	if (doc.content_b64 && (doc.mime_type === 'application/pdf' || doc.mime_type.startsWith('image/'))) {
 		const buf = Buffer.from(doc.content_b64, 'base64');

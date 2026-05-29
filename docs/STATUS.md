@@ -64,9 +64,21 @@ Livré (increment 2 — 2026-05-29, session root) :
   agent ; panneau élargi (`--g-arfa-w-wide`) en mode Code. `svelte-check` 0 erreur.
   L'édition depuis le browser reste volontairement hors périmètre (l'agent édite).
 
-Reste à faire :
-- Refinement : rendu inline markdown/code dans Arfa onglet Doc (actuellement iframe `/api/documents/[id]`).
-- Coloration syntaxique dans la vue Code (actuellement mono + numéros de ligne, sans tokenizer).
+Livré (increment 3 — 2026-05-29, session root) :
+- **Coloration syntaxique** : nouveau module isomorphe **zéro-dép** `src/lib/highlight.ts`
+  (tokenizer single-pass, modes js/ts, css, json, py, sh, markup svelte/html, plain).
+  Sortie HTML entièrement échappée (testé : un `<script>` dans un doc reste inerte).
+  Appliquée dans la **vue Code** avec gutter de numéros de ligne collant (scroll
+  horizontal sans perdre les numéros). Perf : 80 Ko colorés en ~3 ms.
+- **Rendu inline onglet Doc** : les documents **code/texte** s'affichent désormais
+  colorés **inline** dans Arfa (plus d'iframe imbriquée), via `/api/documents/[id]?raw=1`.
+  PDF, images **et markdown** restent en iframe — choix de sécurité : le markdown
+  rendu par `marked` peut contenir du HTML brut, on le garde **sandboxé** dans l'iframe
+  plutôt que de l'injecter dans l'origine du cockpit.
+
+Reste à faire (optionnel) :
+- Rendre le markdown inline aussi, si on ajoute un sanitizer (sinon garder l'iframe sandbox).
+- Détection de langage plus fine pour la coloration markup (svelte = mode allégé).
 
 ## Audit système — 2026-05-29 (session root)
 
