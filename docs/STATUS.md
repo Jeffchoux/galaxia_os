@@ -1,7 +1,26 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-25** — **Sprint 3 pivoté** (D6 tranchée par Jeff) : thème = Voix Jarvis + TikTok temps réel + Arbo Dropbox, dogfooding galaxie mère uniquement. PME pilote glisse à Sprint 4. Détail dans [`DECISIONS.md`](DECISIONS.md) § D6 et plan chiffré dans [`ROADMAP-Q3-2026.md`](ROADMAP-Q3-2026.md) § Sprint 3. Stack voix retenue : Picovoice Porcupine WASM + Kyutai STT/TTS (GPU mère) + cascade STT→Claude→TTS. D1/D2/D3 toujours ouvertes ; D2 (PME pilote) butoir 2026-06-21 désormais purement informatif (déplacement assumé Q3→Q3-Q4).
+> Dernière révision : **2026-05-29** — Voix cockpit basculée **cross-browser par défaut** (cascade serveur Whisper + Kyutai). Web Speech reste optionnel via toggle. Cockpit défaut modèle bascule sur `claude-opus-4-8` (sortie 2026-05-28). Restart `galaxia-cockpit.service` requis pour activer. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Galaxia 2.0 — refonte UI « copie conforme Claude Code » (2026-05-29, session root)
+
+Chantier lancé : faire du cockpit une interface type Claude Code (chat + artefacts
++ projets + vue code) avec une **identité violette** distincte du terracotta de Claude.
+
+Livré (increment 1) :
+- **Design system** : `apps/cockpit/src/lib/theme.css` — tokens CSS (palette violette
+  `--g-primary` #7c3aed, surfaces, états voix, rayons, ombres). Importé dans
+  `+layout.svelte`. Les couleurs hardcodées du monolithe `+page.svelte` ont été
+  migrées vers ces variables (le thème se change désormais en un seul endroit).
+- **Layout 3 panneaux** : la grille passe de 2 à 3 colonnes
+  (`sidebar | chat | Arfa`). Le panneau **Arfa** (artefacts) remplace l'ancienne
+  modale d'aperçu document : docké à droite, animé, repli sous 1100px en overlay.
+
+Reste à faire (workstreams suivis dans les tasks de session) :
+- **WS3 Projets** : table `projects` + `conversations.project_id`, regroupement sidebar.
+- **WS4 Vue code agentique** : onglet Code dans Arfa, édition pilotée par l'agent coder.
+- Refinement : rendu inline markdown/code dans Arfa (actuellement iframe `/api/documents/[id]`).
 
 ## Audit système — 2026-05-29 (session root)
 
@@ -24,10 +43,14 @@ plusieurs points devenus faux dans la table « Services qui tournent » ci-desso
 - **Sécurité corrigée ce jour** : `/opt/agents/telegram-bot/.env` était en `644` (world-readable)
   → repassé `600`. Repo Galaxia avait de nombreux fichiers `root`-owned (piège double-compte) →
   `chown -R galaxia:galaxia` appliqué.
-- **Cockpit** : `COCKPIT_MODEL=claude-opus-4-7` (défaut codé `env.ts` = opus-4-7 aussi). ⚠️ Incohérent
-  avec D3 (Sonnet par défaut pour le coût) — défaut premium non corrigé, à trancher. `claude-opus-4-8`
-  ajouté à `pricing.ts` (sorti 2026-05-28, prix annoncé identique à 4.7) : sélectionnable via
-  `COCKPIT_MODEL=claude-opus-4-8`, **pas mis en défaut**.
+- **Cockpit** : `COCKPIT_MODEL=claude-opus-4-8` (défaut codé `env.ts` aussi `opus-4-8` depuis 2026-05-29).
+  ⚠️ Toujours incohérent avec D3 (Sonnet par défaut pour le coût) — défaut premium maintenu à la
+  demande de Jeff pour la session Voix Jarvis (2026-05-29). À retrancher après dogfooding voix.
+- **Voix cockpit — bascule cross-browser 2026-05-29** : défauts STT/TTS passés à `whisper` + `kyutai`
+  (cascade serveur). SpeechRecognition / SpeechSynthesis restent disponibles via toggle mais ne
+  sont plus indispensables → l'UI fonctionne désormais sur Firefox et Safari (exigence Jeff
+  « Mac + Windows, n'importe quel navigateur »). Auto-bascule de `browser` vers `whisper` si
+  Web Speech absent au moment du clic 🎤. Restart `galaxia-cockpit.service` nécessaire pour activer.
 
 ## Bootstrap éclair pour un nouvel agent
 

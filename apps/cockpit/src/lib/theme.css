@@ -1,0 +1,56 @@
+/* Galaxia design tokens — identité violette, distincte du terracotta de Claude Code.
+   Centralise les couleurs jusqu'ici hardcodées dans +page.svelte. Toute nouvelle
+   surface doit consommer ces vars plutôt que des littéraux hex. */
+
+:root {
+	/* Palette violette Galaxia */
+	--g-primary: #7c3aed;
+	--g-primary-light: #c084fc;
+	--g-primary-dark: #1a0e2e;
+	--g-primary-08: rgba(124, 58, 237, 0.08);
+	--g-primary-15: rgba(124, 58, 237, 0.15);
+	--g-primary-20: rgba(124, 58, 237, 0.2);
+	--g-primary-25: rgba(124, 58, 237, 0.25);
+	--g-primary-30: rgba(124, 58, 237, 0.3);
+	--g-primary-50: rgba(124, 58, 237, 0.5);
+
+	/* Surfaces (du plus sombre au plus clair) */
+	--g-bg: #07060c;
+	--g-surface: #0c0a18;
+	--g-surface-raised: #120e22;
+	--g-surface-overlay: #161229;
+
+	/* Texte */
+	--g-fg: #e9e9f4;
+	--g-fg-muted: #b9b9d0;
+	--g-fg-faint: #6b6b85;
+	--g-fg-dim: #555;
+
+	/* Bordures */
+	--g-border: var(--g-primary-15);
+	--g-border-strong: var(--g-primary-30);
+
+	/* États voix / activité */
+	--g-state-listening: #34d399;
+	--g-state-thinking: #fbbf24;
+	--g-state-speaking: #60a5fa;
+	--g-state-error: #f87171;
+
+	/* Rayons */
+	--g-radius-sm: 6px;
+	--g-radius: 8px;
+	--g-radius-lg: 12px;
+
+	/* Ombres */
+	--g-glow: 0 0 8px var(--g-primary-50);
+	--g-shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.35);
+
+	/* Typo */
+	--g-font:
+		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--g-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+
+	/* Layout */
+	--g-sidebar-w: 280px;
+	--g-arfa-w: 460px;
+}

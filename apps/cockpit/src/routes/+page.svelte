@@ -86,7 +86,11 @@
 	//   Bypasse Claude/Whisper/Kyutai — c'est une autre identité (GPT-4o vocal)
 	//   à laquelle on injecte les instructions Galaxia côté serveur.
 	// La queue serveur partagée (piperQueue, nom historique) gère piper ET kyutai.
-	let ttsBackend = $state<'browser' | 'piper' | 'kyutai' | 'realtime'>('browser');
+	// Défaut = 'kyutai' depuis 2026-05-29 : exigence cross-browser (Mac+Windows
+	// Safari/Firefox/Chrome/Edge). La cascade serveur ne dépend que de Web Audio
+	// API et MediaSource, supportés partout, contrairement à SpeechSynthesis qui
+	// est partiel sur Safari/Firefox.
+	let ttsBackend = $state<'browser' | 'piper' | 'kyutai' | 'realtime'>('kyutai');
 	let piperQueue: string[] = [];
 	let piperPumpRunning = false;
 	let currentPiperAudio: HTMLAudioElement | null = null;
@@ -97,7 +101,9 @@
 	//               large-v3-turbo int8 sur CPU, souverain, RTF≈1.2 turn-based).
 	// En mode 'whisper' on n'utilise PAS Web Speech ; la transcription part du
 	// segment audio que Silero VAD nous livre via `onSpeechEnd`.
-	let sttBackend = $state<'browser' | 'whisper'>('browser');
+	// Défaut = 'whisper' depuis 2026-05-29 : SpeechRecognition n'existe pas sur
+	// Firefox et est partiel sur Safari. Whisper local marche partout via getUserMedia.
+	let sttBackend = $state<'browser' | 'whisper'>('whisper');
 
 	// État de la session OpenAI Realtime (D8). `realtimeHandle` est null tant
 	// qu'aucune session WebRTC n'est ouverte ; il est posé par startRealtime()
@@ -357,8 +363,10 @@
 		}
 		const r = getRecognition();
 		if (!r) {
-			listening = false;
-			errorMsg = "Reconnaissance vocale non disponible (Chrome / Edge / Safari requis).";
+			// Pas de SpeechRecognition (Firefox, Safari < 14.1) → bascule auto sur
+			// la cascade Whisper serveur qui marche sur tout navigateur via getUserMedia.
+			sttBackend = 'whisper';
+			void startAudioMonitor();
 			return;
 		}
 		try {
@@ -944,7 +952,7 @@
 	<title>{data.active?.title ?? 'Galaxia'}</title>
 </svelte:head>
 
-<div class="app">
+<div class="app" class:arfa-open={!!previewDoc}>
 	<aside class="sidebar">
 		<div class="brand">
 			<span class="dot"></span>
@@ -1048,11 +1056,13 @@
 					class="voice-toggle"
 					class:on={sttBackend === 'whisper'}
 					onclick={() => (sttBackend = sttBackend === 'whisper' ? 'browser' : 'whisper')}
-					disabled={ttsBackend === 'realtime'}
+					disabled={ttsBackend === 'realtime' || (sttBackend === 'whisper' && !voiceSupported.stt)}
 					title={ttsBackend === 'realtime'
 						? 'STT inutile en mode ⚡ Realtime — GPT-4o gère la transcription en interne'
 						: sttBackend === 'whisper'
-							? 'STT Whisper local (souverain, RTF~1.2 CPU, qualité française forte) — clic pour Web Speech navigateur'
+							? voiceSupported.stt
+								? 'STT Whisper local (souverain, RTF~1.2 CPU, qualité française forte) — clic pour Web Speech navigateur'
+								: 'STT Whisper local (seule option dispo : Web Speech non supporté par ce navigateur)'
 							: 'STT Web Speech (instant mais transcrit côté Google chez Chrome) — clic pour Whisper local souverain'}
 				>
 					{sttBackend === 'whisper' ? '🎤 Whisper' : '🎙 Web'}
@@ -1062,14 +1072,12 @@
 					class:on={wakeWord}
 					class:flash={wakeFlash}
 					onclick={toggleWakeWord}
-					disabled={!voiceSupported.stt || ttsBackend === 'realtime'}
+					disabled={ttsBackend === 'realtime' || (sttBackend === 'browser' && !voiceSupported.stt)}
 					title={ttsBackend === 'realtime'
 						? 'Wake word inutile en mode ⚡ Realtime — la session est ouverte en continu tant que Voix est actif'
-						: voiceSupported.stt
-							? wakeWord
-								? "Wake word actif — il faut commencer ton message par 'Galaxia' ou 'Hey Galaxia'"
-								: 'Activer le wake word — seules les phrases commençant par Galaxia déclenchent l\'envoi'
-							: 'Reconnaissance vocale non supportée par ce navigateur'}
+						: wakeWord
+							? "Wake word actif — il faut commencer ton message par 'Galaxia' ou 'Hey Galaxia'"
+							: 'Activer le wake word — seules les phrases commençant par Galaxia déclenchent l\'envoi'}
 				>
 					{wakeWord ? '👂 Wake on' : '👂 Wake'}
 				</button>
@@ -1077,16 +1085,16 @@
 					class="voice-toggle"
 					class:on={voiceMode}
 					onclick={toggleVoiceMode}
-					disabled={!voiceSupported.tts && ttsBackend !== 'realtime'}
+					disabled={ttsBackend === 'browser' && !voiceSupported.tts}
 					title={ttsBackend === 'realtime'
 						? voiceMode
 							? 'Session Realtime ouverte — parle, GPT-4o écoute en continu (clic pour fermer)'
 							: 'Activer pour ouvrir la session WebRTC vers OpenAI Realtime'
-						: voiceSupported.tts
-							? voiceMode
+						: ttsBackend === 'browser' && !voiceSupported.tts
+							? 'TTS navigateur non supporté — bascule sur Kyutai ou Piper'
+							: voiceMode
 								? 'Mode mains libres actif — tu peux interrompre Galaxia en parlant'
-								: 'Activer le mode mains libres (TTS auto + interruption par la voix)'
-							: 'TTS non supporté par ce navigateur'}
+								: 'Activer le mode mains libres (TTS auto + interruption par la voix)'}
 				>
 					{#if voiceMode}
 						{ttsBackend === 'realtime'
@@ -1288,56 +1296,39 @@
 			{/if}
 		</div>
 	</main>
-</div>
 
-{#if previewDoc}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="preview-backdrop" onclick={closePreview} onkeydown={onPreviewKey} tabindex="-1">
-		<div
-			class="preview-modal"
-			onclick={(e) => e.stopPropagation()}
-			role="dialog"
-			aria-modal="true"
-			aria-label="Aperçu du document {previewDoc.filename}"
-			tabindex="-1"
-		>
-			<header class="preview-head">
-				<span class="preview-icon">{docIcon(previewDoc.mime_type)}</span>
-				<span class="preview-name">{previewDoc.filename}</span>
-				<span class="preview-meta">{fmtBytes(previewDoc.size)}</span>
+	{#if previewDoc}
+		<aside class="arfa" aria-label="Artefact : {previewDoc.filename}">
+			<header class="arfa-head">
+				<span class="arfa-icon">{docIcon(previewDoc.mime_type)}</span>
+				<span class="arfa-name">{previewDoc.filename}</span>
+				<span class="arfa-meta">{fmtBytes(previewDoc.size)}</span>
 				<a
-					class="preview-dl"
+					class="arfa-dl"
 					href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
 					target="_blank"
 					rel="noopener"
 					title="Ouvrir dans un nouvel onglet"
 				>↗</a>
-				<button class="preview-close" onclick={closePreview} aria-label="Fermer">×</button>
+				<button class="arfa-close" onclick={closePreview} aria-label="Fermer le panneau">×</button>
 			</header>
 			<iframe
-				class="preview-iframe"
+				class="arfa-iframe"
 				title={previewDoc.filename}
 				src={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
 			></iframe>
-		</div>
-	</div>
-{/if}
+		</aside>
+	{/if}
+</div>
 
 <svelte:window onkeydown={onPreviewKey} />
 
 <style>
 	:global(body) {
 		margin: 0;
-		background: #07060c;
-		color: #e9e9f4;
-		font-family:
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			Segoe UI,
-			Roboto,
-			sans-serif;
+		background: var(--g-bg);
+		color: var(--g-fg);
+		font-family: var(--g-font);
 		height: 100vh;
 		overflow: hidden;
 	}
@@ -1347,15 +1338,19 @@
 
 	.app {
 		display: grid;
-		grid-template-columns: 280px 1fr;
+		grid-template-columns: var(--g-sidebar-w) 1fr;
 		height: 100vh;
+		transition: grid-template-columns 0.18s ease-out;
+	}
+	.app.arfa-open {
+		grid-template-columns: var(--g-sidebar-w) 1fr var(--g-arfa-w);
 	}
 
 	.sidebar {
 		display: flex;
 		flex-direction: column;
-		background: #0c0a18;
-		border-right: 1px solid rgba(124, 58, 237, 0.15);
+		background: var(--g-surface);
+		border-right: 1px solid var(--g-primary-15);
 		padding: 1rem 0.75rem;
 		gap: 0.75rem;
 	}
@@ -1365,19 +1360,19 @@
 		gap: 0.5rem;
 		font-weight: 600;
 		padding: 0.25rem 0.5rem 0.5rem;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.15);
+		border-bottom: 1px solid var(--g-primary-15);
 	}
 	.dot {
 		width: 10px;
 		height: 10px;
 		border-radius: 50%;
-		background: radial-gradient(circle at 30% 30%, #c084fc, #7c3aed 60%, #1a0e2e);
-		box-shadow: 0 0 8px rgba(124, 58, 237, 0.5);
+		background: radial-gradient(circle at 30% 30%, var(--g-primary-light), var(--g-primary) 60%, var(--g-primary-dark));
+		box-shadow: 0 0 8px var(--g-primary-50);
 	}
 	.new {
-		background: rgba(124, 58, 237, 0.15);
+		background: var(--g-primary-15);
 		color: #ddd;
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		border: 1px solid var(--g-primary-30);
 		padding: 0.6rem;
 		border-radius: 8px;
 		font-size: 0.875rem;
@@ -1385,7 +1380,7 @@
 		text-align: left;
 	}
 	.new:hover {
-		background: rgba(124, 58, 237, 0.25);
+		background: var(--g-primary-25);
 	}
 	.convlist {
 		flex: 1;
@@ -1400,16 +1395,16 @@
 		gap: 0.5rem;
 		padding: 0.5rem 0.6rem;
 		border-radius: 6px;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		font-size: 0.875rem;
 	}
 	.convlist a:hover {
-		background: rgba(124, 58, 237, 0.08);
+		background: var(--g-primary-08);
 		color: #fff;
 	}
 	.convlist a.active {
-		background: rgba(124, 58, 237, 0.2);
+		background: var(--g-primary-20);
 		color: #fff;
 	}
 	.convlist .title {
@@ -1419,7 +1414,7 @@
 		flex: 1;
 	}
 	.convlist .date {
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		font-size: 0.75rem;
 		flex-shrink: 0;
 	}
@@ -1430,18 +1425,18 @@
 	}
 	.sidebar-extras {
 		padding-top: 0.5rem;
-		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		border-top: 1px solid var(--g-primary-15);
 	}
 	.extras-link {
 		display: block;
 		padding: 0.5rem 0.6rem;
 		font-size: 0.8rem;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		border-radius: 6px;
 	}
 	.extras-link:hover {
-		background: rgba(124, 58, 237, 0.08);
+		background: var(--g-primary-08);
 		color: #fff;
 	}
 	.briefs-section {
@@ -1449,7 +1444,7 @@
 		flex-direction: column;
 		gap: 0.15rem;
 		padding-top: 0.5rem;
-		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		border-top: 1px solid var(--g-primary-15);
 	}
 	.briefs-head {
 		display: flex;
@@ -1459,18 +1454,18 @@
 		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		font-weight: 600;
 	}
 	.all-link {
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		text-decoration: none;
 		text-transform: none;
 		letter-spacing: 0;
 		font-size: 0.75rem;
 	}
 	.all-link:hover {
-		color: #c084fc;
+		color: var(--g-primary-light);
 	}
 	.brief-item {
 		display: flex;
@@ -1478,12 +1473,12 @@
 		gap: 0.5rem;
 		padding: 0.4rem 0.6rem;
 		border-radius: 6px;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		font-size: 0.8rem;
 	}
 	.brief-item:hover {
-		background: rgba(124, 58, 237, 0.08);
+		background: var(--g-primary-08);
 		color: #fff;
 	}
 	.brief-item.fallback {
@@ -1496,7 +1491,7 @@
 		flex: 1;
 	}
 	.brief-date {
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		font-size: 0.7rem;
 		flex-shrink: 0;
 	}
@@ -1505,7 +1500,7 @@
 	}
 	.ghost {
 		background: transparent;
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		border: none;
 		padding: 0.5rem;
 		cursor: pointer;
@@ -1514,7 +1509,7 @@
 		text-align: left;
 	}
 	.ghost:hover {
-		color: #e9e9f4;
+		color: var(--g-fg);
 	}
 
 	.main {
@@ -1528,7 +1523,7 @@
 		justify-content: space-between;
 		gap: 1rem;
 		padding: 0.75rem 1.5rem;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.15);
+		border-bottom: 1px solid var(--g-primary-15);
 	}
 	header h1 {
 		margin: 0;
@@ -1547,8 +1542,8 @@
 	}
 	.voice-toggle {
 		background: rgba(124, 58, 237, 0.1);
-		color: #b9b9d0;
-		border: 1px solid rgba(124, 58, 237, 0.25);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
 		padding: 0.4rem 0.75rem;
 		border-radius: 8px;
 		font-size: 0.85rem;
@@ -1556,17 +1551,17 @@
 		transition: all 0.15s;
 	}
 	.voice-toggle:hover:not(:disabled) {
-		background: rgba(124, 58, 237, 0.2);
+		background: var(--g-primary-20);
 		color: #fff;
 	}
 	.voice-toggle.on {
-		background: #7c3aed;
+		background: var(--g-primary);
 		color: #fff;
-		border-color: #7c3aed;
+		border-color: var(--g-primary);
 	}
 	.voice-toggle.flash {
-		background: #c084fc;
-		border-color: #c084fc;
+		background: var(--g-primary-light);
+		border-color: var(--g-primary-light);
 		animation: wake-flash 0.6s ease-out;
 	}
 	@keyframes wake-flash {
@@ -1613,16 +1608,16 @@
 		display: inline-block;
 	}
 	.conv-state .dot-listening {
-		background: #34d399;
+		background: var(--g-state-listening);
 		box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
 		animation: pulse-green 1.4s infinite;
 	}
 	.conv-state .dot-thinking {
-		background: #fbbf24;
+		background: var(--g-state-thinking);
 		animation: pulse-amber 1.2s infinite;
 	}
 	.conv-state .dot-speaking {
-		background: #60a5fa;
+		background: var(--g-state-speaking);
 		animation: pulse-blue 0.9s infinite;
 	}
 	.conv-state .dot-idle {
@@ -1657,7 +1652,7 @@
 		color: #5a5a76;
 	}
 	.realtime-banner {
-		background: linear-gradient(135deg, rgba(124, 58, 237, 0.15), rgba(59, 130, 246, 0.12));
+		background: linear-gradient(135deg, var(--g-primary-15), rgba(59, 130, 246, 0.12));
 		border: 1px solid rgba(124, 58, 237, 0.35);
 		border-radius: 12px;
 		padding: 0.85rem 1rem;
@@ -1706,10 +1701,10 @@
 		margin: 0 auto;
 	}
 	.turn.user .role {
-		color: #c084fc;
+		color: var(--g-primary-light);
 	}
 	.turn.assistant .role {
-		color: #7c3aed;
+		color: var(--g-primary);
 	}
 	.role {
 		font-size: 0.75rem;
@@ -1725,7 +1720,7 @@
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		background: #7c3aed;
+		background: var(--g-primary);
 		animation: pulse 1.2s ease-in-out infinite;
 	}
 	@keyframes pulse {
@@ -1759,8 +1754,8 @@
 		font-size: 0.75rem;
 		padding: 0.15rem 0.55rem;
 		border-radius: 999px;
-		background: rgba(124, 58, 237, 0.15);
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		background: var(--g-primary-15);
+		border: 1px solid var(--g-primary-30);
 		color: #c4c4d8;
 	}
 	.tool-chip.err {
@@ -1786,7 +1781,7 @@
 		display: flex;
 		gap: 0.5rem;
 		padding: 1rem 1.5rem 1.25rem;
-		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		border-top: 1px solid var(--g-primary-15);
 		max-width: 800px;
 		width: 100%;
 		margin: 0 auto;
@@ -1797,9 +1792,9 @@
 		width: 2.7rem;
 		height: 2.7rem;
 		padding: 0;
-		background: rgba(124, 58, 237, 0.15);
+		background: var(--g-primary-15);
 		color: #fff;
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		border: 1px solid var(--g-primary-30);
 		border-radius: 10px;
 		font-size: 1.1rem;
 		cursor: pointer;
@@ -1808,7 +1803,7 @@
 		transition: all 0.15s;
 	}
 	.mic:hover:not(:disabled) {
-		background: rgba(124, 58, 237, 0.3);
+		background: var(--g-primary-30);
 	}
 	.mic.listening {
 		background: #ef4444;
@@ -1839,7 +1834,7 @@
 		max-height: 200px;
 		padding: 0.7rem 0.9rem;
 		background: rgba(20, 18, 32, 0.5);
-		border: 1px solid rgba(124, 58, 237, 0.25);
+		border: 1px solid var(--g-primary-25);
 		border-radius: 10px;
 		color: #fff;
 		font-size: 0.95rem;
@@ -1848,7 +1843,7 @@
 	}
 	textarea:focus {
 		outline: none;
-		border-color: #7c3aed;
+		border-color: var(--g-primary);
 	}
 	textarea:disabled {
 		opacity: 0.5;
@@ -1858,13 +1853,13 @@
 		bottom: -1.4rem;
 		left: 0.5rem;
 		font-size: 0.8rem;
-		color: #7c3aed;
+		color: var(--g-primary);
 		font-style: italic;
 		pointer-events: none;
 	}
 	.composer > button[type='submit'] {
 		padding: 0.75rem 1.25rem;
-		background: #7c3aed;
+		background: var(--g-primary);
 		color: white;
 		border: none;
 		border-radius: 10px;
@@ -1883,11 +1878,11 @@
 	/* — Cowork : documents joints — */
 	.composer-wrap {
 		position: relative;
-		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		border-top: 1px solid var(--g-primary-15);
 		transition: background 0.15s;
 	}
 	.composer-wrap.drag {
-		background: rgba(124, 58, 237, 0.08);
+		background: var(--g-primary-08);
 	}
 	.composer-wrap > .composer {
 		border-top: none;
@@ -1905,11 +1900,11 @@
 		align-items: center;
 		gap: 0.4rem;
 		background: rgba(124, 58, 237, 0.12);
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		border: 1px solid var(--g-primary-30);
 		border-radius: 16px;
 		padding: 0.15rem 0.4rem 0.15rem 0.15rem;
 		font-size: 0.8rem;
-		color: #e9e9f4;
+		color: var(--g-fg);
 		max-width: 280px;
 		transition: background 0.15s;
 	}
@@ -1940,7 +1935,7 @@
 	.chip .remove {
 		background: none;
 		border: none;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		cursor: pointer;
 		font-size: 1rem;
 		line-height: 1;
@@ -1957,8 +1952,8 @@
 		height: 2.7rem;
 		padding: 0;
 		background: rgba(124, 58, 237, 0.1);
-		color: #b9b9d0;
-		border: 1px solid rgba(124, 58, 237, 0.25);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
 		border-radius: 10px;
 		font-size: 1.05rem;
 		cursor: pointer;
@@ -1967,7 +1962,7 @@
 		transition: all 0.15s;
 	}
 	.attach:hover:not(:disabled) {
-		background: rgba(124, 58, 237, 0.25);
+		background: var(--g-primary-25);
 		color: #fff;
 	}
 	.attach:disabled {
@@ -1980,54 +1975,41 @@
 		display: grid;
 		place-items: center;
 		background: rgba(20, 18, 40, 0.85);
-		color: #c084fc;
+		color: var(--g-primary-light);
 		font-weight: 600;
 		font-size: 1.05rem;
 		pointer-events: none;
-		border: 2px dashed #7c3aed;
+		border: 2px dashed var(--g-primary);
 		border-radius: 8px;
 		margin: 0.5rem;
 	}
 
-	/* — Preview modal — */
-	.preview-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(5, 5, 12, 0.78);
-		backdrop-filter: blur(4px);
-		display: grid;
-		place-items: center;
-		z-index: 100;
-		padding: 2rem;
-		animation: fade-in 0.15s ease-out;
-	}
-	@keyframes fade-in {
-		from { opacity: 0; }
-		to { opacity: 1; }
-	}
-	.preview-modal {
+	/* — Panneau Arfa (artefacts, docké à droite comme Claude Code) — */
+	.arfa {
 		display: flex;
 		flex-direction: column;
-		width: min(900px, 96vw);
-		height: min(85vh, 900px);
-		background: #0c0a18;
-		border: 1px solid rgba(124, 58, 237, 0.3);
-		border-radius: 12px;
-		box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-		overflow: hidden;
+		min-width: 0;
+		background: var(--g-surface);
+		border-left: 1px solid var(--g-border-strong);
+		box-shadow: var(--g-shadow-panel);
+		animation: arfa-slide 0.18s ease-out;
 	}
-	.preview-head {
+	@keyframes arfa-slide {
+		from { transform: translateX(20px); opacity: 0; }
+		to { transform: translateX(0); opacity: 1; }
+	}
+	.arfa-head {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+		border-bottom: 1px solid var(--g-primary-20);
 		background: rgba(20, 18, 32, 0.5);
 	}
-	.preview-icon {
+	.arfa-icon {
 		font-size: 1.1rem;
 	}
-	.preview-name {
+	.arfa-name {
 		flex: 1;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -2035,34 +2017,50 @@
 		font-weight: 500;
 		color: #fff;
 	}
-	.preview-meta {
-		color: #6b6b85;
+	.arfa-meta {
+		color: var(--g-fg-faint);
 		font-size: 0.8rem;
 		flex-shrink: 0;
 	}
-	.preview-dl, .preview-close {
+	.arfa-dl, .arfa-close {
 		flex-shrink: 0;
 		width: 2rem;
 		height: 2rem;
 		display: grid;
 		place-items: center;
-		background: rgba(124, 58, 237, 0.15);
-		color: #b9b9d0;
-		border: 1px solid rgba(124, 58, 237, 0.25);
-		border-radius: 6px;
+		background: var(--g-primary-15);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
+		border-radius: var(--g-radius-sm);
 		text-decoration: none;
 		font-size: 1.1rem;
 		cursor: pointer;
 		line-height: 1;
 	}
-	.preview-dl:hover, .preview-close:hover {
-		background: rgba(124, 58, 237, 0.3);
+	.arfa-dl:hover, .arfa-close:hover {
+		background: var(--g-primary-30);
 		color: #fff;
 	}
-	.preview-iframe {
+	.arfa-iframe {
 		flex: 1;
 		width: 100%;
 		border: none;
-		background: #07060c;
+		background: var(--g-bg);
+	}
+
+	@media (max-width: 1100px) {
+		/* Sous 1100px le panneau Arfa passe en overlay flottant plutôt que
+		   de comprimer le chat. */
+		.app.arfa-open {
+			grid-template-columns: var(--g-sidebar-w) 1fr;
+		}
+		.arfa {
+			position: fixed;
+			top: 0;
+			right: 0;
+			bottom: 0;
+			width: min(var(--g-arfa-w), 92vw);
+			z-index: 100;
+		}
 	}
 </style>
