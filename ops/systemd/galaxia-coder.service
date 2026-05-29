@@ -13,6 +13,13 @@ WorkingDirectory=/home/galaxia/galaxia-project/agents/coder
 # optionnelle : pas d'échec si le fichier n'existe pas encore (l'agent
 # fail-closera proprement avec "ANTHROPIC_API_KEY missing").
 EnvironmentFile=-/opt/galaxia/config/.env
+# GH_TOKEN doit être présent dans ce fichier pour que `gh pr create` réussisse
+# sous systemd : le service ne passe par aucun `gh auth login` interactif, donc
+# gh n'a aucune identité — GH_TOKEN lui en fournit une (auth non-interactive).
+# (`git push` n'en a pas besoin : il utilise la deploy key SSH.)
+# Ajouter dans /opt/galaxia/config/.env :
+#   GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Scope minimum : `public_repo` (le repo galaxia_os est public).
 ExecStart=/usr/bin/node /home/galaxia/galaxia-project/agents/coder/index.mjs
 # Cap à 60 min : un run normal tient en 5–15 min. Au-delà = boucle, on coupe.
 TimeoutStartSec=3600
