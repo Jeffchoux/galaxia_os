@@ -144,6 +144,33 @@
 		};
 	});
 
+	// ─── Shell « copie conforme » : menus déroulants du footer (Agir / Projet) ─
+	// État d'ouverture des deux menus du composer. Un seul ouvert à la fois ;
+	// fermés au clic ailleurs (cf. <svelte:window onclick={closeMenus}>).
+	let agirOpen = $state(false);
+	let projOpen = $state(false);
+
+	// Projet courant : celui de la conversation active si elle existe, sinon le
+	// projet « en attente » qui sera appliqué à la création (pendingProjectId).
+	const currentProjectId = $derived(data.active ? data.active.project_id : pendingProjectId);
+	const currentProjectName = $derived(
+		(data.projects as Project[]).find((p) => p.id === currentProjectId)?.name ?? null
+	);
+
+	// Range la conversation dans un projet depuis le footer. Si la conversation
+	// n'existe pas encore, on mémorise le choix (pendingProjectId) — ensureConversation
+	// le passera au POST de création. Sinon on persiste tout de suite (moveConversation).
+	function setConversationProject(projectId: string | null) {
+		if (data.active) moveConversation(data.active.id, projectId);
+		else pendingProjectId = projectId;
+		projOpen = false;
+	}
+
+	function closeMenus() {
+		agirOpen = false;
+		projOpen = false;
+	}
+
 	// ─── Vue Code (WS4) — arborescence read-only du repo dans le panneau Arfa ─
 	type CodeNode = { name: string; path: string; type: 'dir' | 'file'; children?: CodeNode[] };
 	type CodeTree = { available: boolean; root: string; nodes: CodeNode[]; truncated: boolean };
@@ -1176,6 +1203,27 @@
 			<span class="dot"></span>
 			<span>Galaxia</span>
 		</div>
+		<div class="shell-modes" role="tablist" aria-label="Mode de travail">
+			<button
+				class="shell-mode"
+				class:active={!codeOpen}
+				role="tab"
+				aria-selected={!codeOpen}
+				onclick={closeCode}
+			>💬 Chat</button>
+			<button
+				class="shell-mode"
+				class:active={codeOpen}
+				role="tab"
+				aria-selected={codeOpen}
+				onclick={openCode}
+			>&lt;/&gt; Code</button>
+			<button
+				class="shell-mode disabled"
+				disabled
+				title="Cowork (assistance live sur ton écran) — bientôt"
+			>🤝 Cowork</button>
+		</div>
 		<div class="new-row">
 			<button class="new" onclick={() => newConversation()}>+ Nouvelle conversation</button>
 			<button
@@ -1282,19 +1330,6 @@
 		<header>
 			<div class="head-title">
 				<h1>{data.active?.title ?? 'Hey Galaxia, on parle ?'}</h1>
-				{#if data.active}
-					<select
-						class="proj-select"
-						title="Ranger cette conversation dans un projet"
-						value={data.active.project_id ?? ''}
-						onchange={(e) => moveConversation(data.active!.id, e.currentTarget.value || null)}
-					>
-						<option value="">— Hors projet —</option>
-						{#each grouped.projects as p (p.id)}
-							<option value={p.id}>{p.name}</option>
-						{/each}
-					</select>
-				{/if}
 			</div>
 			<div class="header-actions">
 				<button
@@ -1544,29 +1579,133 @@
 						if (t.files) uploadFiles(t.files);
 					}}
 				/>
-				<button
-					type="button"
-					class="mode-toggle"
-					class:pro={chatMode === 'pro'}
-					onclick={() => (chatMode = chatMode === 'pro' ? 'free' : 'pro')}
-					disabled={sending}
-					title={chatMode === 'pro'
-						? 'Modèle : Opus 4.8 + outils (coder / améliorer Galaxia / com). Clique pour repasser en mode rapide gratuit.'
-						: 'Modèle : rapide & gratuit (Groq), chat nu, pour les petites tâches. Clique pour passer en Opus 4.8.'}
-					aria-label="Changer de modèle"
-				>
-					{chatMode === 'pro' ? '🧠 Opus' : '⚡ Rapide'}
-				</button>
-				<button
-					type="button"
-					class="attach"
-					onclick={() => fileInput?.click()}
-					disabled={uploading || sending}
-					title="Joindre PDF / Markdown / TXT / Image (drag-drop accepté)"
-					aria-label="Joindre un document"
-				>
-					{uploading ? '…' : '📎'}
-				</button>
+				<div class="menu-wrap">
+					<button
+						type="button"
+						class="agir"
+						class:open={agirOpen}
+						onclick={(e) => {
+							e.stopPropagation();
+							agirOpen = !agirOpen;
+							projOpen = false;
+						}}
+						disabled={sending}
+						aria-haspopup="menu"
+						aria-expanded={agirOpen}
+						title="Actions : joindre un fichier, voir le code, choisir le modèle"
+					>＋ Agir</button>
+					{#if agirOpen}
+						<div class="menu" role="menu">
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitem"
+								onclick={() => {
+									agirOpen = false;
+									fileInput?.click();
+								}}
+								disabled={uploading}
+							>
+								<span class="mi-ico">📎</span>
+								{uploading ? 'Envoi en cours…' : 'Joindre un fichier'}
+							</button>
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitem"
+								onclick={() => {
+									agirOpen = false;
+									openCode();
+								}}
+							>
+								<span class="mi-ico">&lt;/&gt;</span> Voir le code
+							</button>
+							<div class="menu-sep">Modèle</div>
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitemradio"
+								aria-checked={chatMode === 'free'}
+								onclick={() => {
+									chatMode = 'free';
+									agirOpen = false;
+								}}
+							>
+								<span class="mi-ico">⚡</span> Rapide (gratuit)
+								{#if chatMode === 'free'}<span class="mi-check">✓</span>{/if}
+							</button>
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitemradio"
+								aria-checked={chatMode === 'pro'}
+								onclick={() => {
+									chatMode = 'pro';
+									agirOpen = false;
+								}}
+							>
+								<span class="mi-ico">🧠</span> Opus 4.8
+								{#if chatMode === 'pro'}<span class="mi-check">✓</span>{/if}
+							</button>
+						</div>
+					{/if}
+				</div>
+				<div class="menu-wrap">
+					<button
+						type="button"
+						class="agir proj-trigger"
+						class:open={projOpen}
+						class:set={!!currentProjectId}
+						onclick={(e) => {
+							e.stopPropagation();
+							projOpen = !projOpen;
+							agirOpen = false;
+						}}
+						disabled={sending}
+						aria-haspopup="menu"
+						aria-expanded={projOpen}
+						title="Travailler dans un projet"
+					>🗂️ {currentProjectName ?? 'Projet'}</button>
+					{#if projOpen}
+						<div class="menu" role="menu">
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitemradio"
+								aria-checked={!currentProjectId}
+								onclick={() => setConversationProject(null)}
+							>
+								Hors projet
+								{#if !currentProjectId}<span class="mi-check">✓</span>{/if}
+							</button>
+							{#each grouped.projects as p (p.id)}
+								<button
+									type="button"
+									class="menu-item"
+									role="menuitemradio"
+									aria-checked={currentProjectId === p.id}
+									onclick={() => setConversationProject(p.id)}
+								>
+									<span class="mi-ico">🗂️</span> {p.name}
+									{#if currentProjectId === p.id}<span class="mi-check">✓</span>{/if}
+								</button>
+							{/each}
+							<div class="menu-sep-line"></div>
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitem"
+								onclick={() => {
+									projOpen = false;
+									creatingProject = true;
+									newProjectName = '';
+								}}
+							>
+								<span class="mi-ico">＋</span> Nouveau projet…
+							</button>
+						</div>
+					{/if}
+				</div>
 				<button
 					type="button"
 					class="mic"
@@ -1732,7 +1871,7 @@
 	{/if}
 </div>
 
-<svelte:window onkeydown={onPreviewKey} />
+<svelte:window onkeydown={onPreviewKey} onclick={closeMenus} />
 
 <style>
 	:global(body) {
@@ -1782,6 +1921,41 @@
 		border-radius: 50%;
 		background: radial-gradient(circle at 30% 30%, var(--g-primary-light), var(--g-primary) 60%, var(--g-primary-dark));
 		box-shadow: 0 0 8px var(--g-primary-50);
+	}
+	/* — Sélecteur de mode « copie conforme » (Chat / Code / Cowork différé) — */
+	.shell-modes {
+		display: flex;
+		gap: 0.25rem;
+		background: var(--g-primary-08);
+		border: 1px solid var(--g-primary-15);
+		border-radius: 10px;
+		padding: 0.25rem;
+	}
+	.shell-mode {
+		flex: 1;
+		padding: 0.4rem 0.3rem;
+		background: transparent;
+		border: none;
+		border-radius: 7px;
+		color: var(--g-fg-muted);
+		font-size: 0.8rem;
+		font-weight: 600;
+		white-space: nowrap;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.shell-mode:hover:not(.disabled):not(.active) {
+		background: var(--g-primary-10);
+		color: var(--g-fg);
+	}
+	.shell-mode.active {
+		background: var(--g-surface-raised);
+		color: var(--g-primary-dark);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+	}
+	.shell-mode.disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
 	}
 	.new {
 		background: var(--g-primary-15);
@@ -2476,34 +2650,16 @@
 		color: #b91c1c;
 		background: rgba(220, 38, 38, 0.15);
 	}
-	.attach {
+	/* — Footer « copie conforme » : déclencheurs Agir / Projet + menus déroulants —
+	   « Agir » regroupe joindre-un-fichier / voir-le-code / choix du modèle.
+	   « Projet » range la conversation (pilule pleine quand un projet est actif). */
+	.menu-wrap {
+		position: relative;
 		flex-shrink: 0;
-		width: 2.7rem;
+	}
+	.agir {
 		height: 2.7rem;
-		padding: 0;
-		background: var(--g-primary-10);
-		color: var(--g-fg-muted);
-		border: 1px solid var(--g-primary-25);
-		border-radius: 10px;
-		font-size: 1.05rem;
-		cursor: pointer;
-		display: grid;
-		place-items: center;
-		transition: all 0.15s;
-	}
-	.attach:hover:not(:disabled) {
-		background: var(--g-primary-25);
-		color: var(--g-fg);
-	}
-	.attach:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-	/* Toggle modèle : gratuit (défaut) vs Opus 4.8. Pilule compacte qui montre
-	   le modèle actif ; passe en violet plein quand on est en mode pro. */
-	.mode-toggle {
-		flex-shrink: 0;
-		height: 2.7rem;
+		max-width: 11rem;
 		padding: 0 0.7rem;
 		background: var(--g-primary-10);
 		color: var(--g-fg-muted);
@@ -2512,23 +2668,84 @@
 		font-size: 0.82rem;
 		font-weight: 600;
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		cursor: pointer;
-		display: grid;
-		place-items: center;
 		transition: all 0.15s;
 	}
-	.mode-toggle:hover:not(:disabled) {
+	.agir:hover:not(:disabled),
+	.agir.open {
 		background: var(--g-primary-25);
 		color: var(--g-fg);
 	}
-	.mode-toggle.pro {
+	.agir:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.proj-trigger.set {
 		background: var(--g-primary);
 		border-color: var(--g-primary);
 		color: #fff;
 	}
-	.mode-toggle:disabled {
+	.menu {
+		position: absolute;
+		bottom: calc(100% + 0.4rem);
+		left: 0;
+		min-width: 13rem;
+		max-height: 60vh;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		padding: 0.35rem;
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-border-strong);
+		border-radius: 10px;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+		z-index: 50;
+	}
+	.menu-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		padding: 0.5rem 0.6rem;
+		background: transparent;
+		border: none;
+		border-radius: 7px;
+		color: var(--g-fg);
+		font-size: 0.85rem;
+		text-align: left;
+		cursor: pointer;
+	}
+	.menu-item:hover:not(:disabled) {
+		background: var(--g-primary-10);
+	}
+	.menu-item:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
+	}
+	.mi-ico {
+		width: 1.2rem;
+		flex-shrink: 0;
+		text-align: center;
+	}
+	.mi-check {
+		margin-left: auto;
+		color: var(--g-primary);
+		font-weight: 700;
+	}
+	.menu-sep {
+		padding: 0.4rem 0.6rem 0.2rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--g-fg-faint);
+	}
+	.menu-sep-line {
+		height: 1px;
+		margin: 0.25rem 0.3rem;
+		background: var(--g-border);
 	}
 	.drag-overlay {
 		position: absolute;
@@ -2802,21 +3019,6 @@
 		gap: 0.75rem;
 		min-width: 0;
 	}
-	.proj-select {
-		background: var(--g-surface-raised);
-		color: var(--g-fg-muted);
-		border: 1px solid var(--g-border);
-		border-radius: var(--g-radius-sm);
-		padding: 0.25rem 0.4rem;
-		font-size: 0.78rem;
-		cursor: pointer;
-		max-width: 180px;
-	}
-	.proj-select:hover {
-		border-color: var(--g-border-strong);
-		color: var(--g-fg);
-	}
-
 	@media (max-width: 1100px) {
 		/* Sous 1100px le panneau Arfa passe en overlay flottant plutôt que
 		   de comprimer le chat. */
