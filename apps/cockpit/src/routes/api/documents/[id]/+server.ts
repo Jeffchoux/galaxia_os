@@ -1,10 +1,10 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
-import { marked } from 'marked';
 import { deleteDocument, getDocument } from '$lib/server/db';
+import { renderMarkdownSafe } from '$lib/server/markdown';
 
 function htmlPreview(filename: string, body: string, isMarkdown: boolean): string {
 	const inner = isMarkdown
-		? (marked.parse(body, { gfm: true, breaks: true }) as string)
+		? renderMarkdownSafe(body)
 		: `<pre>${body.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c)}</pre>`;
 	const safeTitle = filename.replace(/[<>&]/g, '');
 	return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${safeTitle}</title>
@@ -48,7 +48,15 @@ export const GET: RequestHandler = ({ params, url, locals }) => {
 	// les binaires (PDF, images) restent servis en natif via l'iframe.
 	if (url.searchParams.get('raw')) {
 		if (doc.content_text === null) throw error(415, 'document binaire');
-		return json({ filename: doc.filename, mime_type: doc.mime_type, content: doc.content_text });
+		// Markdown : on renvoie en plus le HTML *assaini* (rendu inline via {@html}
+		// côté client, plus d'iframe). Le code/texte reste rendu brut (coloré client).
+		const isMd = doc.mime_type.includes('markdown') || doc.filename.toLowerCase().endsWith('.md');
+		return json({
+			filename: doc.filename,
+			mime_type: doc.mime_type,
+			content: doc.content_text,
+			html: isMd ? renderMarkdownSafe(doc.content_text) : undefined
+		});
 	}
 
 	// Binaires (PDF + images) → on sert le contenu natif, le browser sait afficher
