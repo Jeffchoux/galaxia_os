@@ -1,7 +1,51 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-30** — **bascule du thème cockpit en CLAIR + accent terracotta** (« copie conforme Claude »), build OK, **pas encore redéployé** (restart à faire). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Détail § « refonte UI » → « Thème clair terracotta » ci-dessous. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-30 (soir)** — **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Chat gratuit outillé + sélecteur de modèle visible (2026-05-30 soir, session root)
+
+**Problème remonté par Jeff :** depuis l'app, le chat répondait « je n'ai aucun accès
+au projet / au VPS ». Cause : le mode par défaut (« ⚡ Rapide », Groq gratuit) était
+**volontairement nu** (prompt système qui annonçait *« aucun outil, pas de fichiers, pas
+de mémoire »*, zéro tool branché). Et le **sélecteur de modèle** (⚡ Rapide / 🧠 Opus)
+était **enterré dans le menu « ＋ Agir »** → un non-dev ne le trouvait pas (il ne voyait
+que le « ⚡ Realtime », qui est le mode **voix**, sans rapport).
+
+**Décision Jeff (question explicite posée) :** brancher l'accès **LECTURE** sur le mode
+gratuit (garde le coût ~0 et la règle « pas de premium par défaut »), plutôt que de passer
+Opus en défaut.
+
+Livré (build `svelte-check` 0 erreur, `vite build` OK, **déployé** restart 19:47 UTC) :
+- **`groq.ts` réécrit** : le mode gratuit déroule désormais une **boucle de function
+  calling** (tool_use → tool_result, max 6 rounds), même contrat `StreamEvent` que le mode
+  pro. Conversion des schémas Anthropic/MCP → format OpenAI (`tools`/`tool_choice`),
+  parsing du streaming `tool_calls` (accumulation par index), tracking usage agrégé.
+  Vérifié contre l'API Groq : `llama-3.3-70b-versatile` émet bien les `tool_calls`.
+- **`tools.ts` → `loadFreeModeTools()`** : natifs (`update_memory` qui n'écrit que dans
+  `memory.md`, `read_brief`, `list_briefs`) + MCP filtrés en **lecture seule** via une
+  **allow-list** explicite (`read_file`, `read_text_file`, `list_directory`,
+  `directory_tree`, `search_files`, `get_file_info`, … + brave search). Les tools
+  **mutants** du filesystem (`write_file`, `edit_file`, `move_file`, `create_directory`)
+  ne sont **jamais** exposés au gratuit → pas d'écriture repo en mode rapide (coder = Opus).
+- **`claude.ts`** : prompt système du mode free réécrit (annonce les outils lecture +
+  « tu ne peux pas écrire, bascule en Opus pour coder »), mémoire persistante injectée
+  **dans les deux modes**, et le mode free passe maintenant `loadFreeModeTools()` à Groq.
+- **`+page.svelte`** : le sélecteur de modèle sort du menu « Agir » et devient un **bouton
+  visible** dans la barre de saisie, affichant l'état courant (« ⚡ Rapide » / « 🧠 Opus »,
+  accent plein terracotta en Opus pour signaler le coût). Menu à deux items avec
+  sous-titres explicites (gratuit = accès lecture / Opus = peut coder, payant).
+
+**Effet :** le chat **par défaut** voit désormais le repo Galaxia sans changer de mode ni
+coût premium. Pour éditer/coder, Jeff bascule en Opus via le bouton désormais visible.
+
+**Limites connues :** en mode gratuit, (1) les pièces jointes/vision restent ignorées
+(chat texte) ; (2) Groq est moins fiable qu'Opus sur l'enchaînement d'outils — si un
+chemin de fichier est relatif, le MCP renvoie une erreur que le modèle corrige au round
+suivant (le prompt nomme la racine absolue `/home/galaxia/galaxia-project`).
+
+**Non commité (à faire) :** ces 4 fichiers + l'archi worker Telegram (cf. plus bas) sont
+encore dans le working tree → **prod en avance sur git**. À brancher + PR.
 
 ## Thème clair terracotta — « copie conforme Claude » (2026-05-30, session root)
 

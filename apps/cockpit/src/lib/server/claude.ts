@@ -4,7 +4,7 @@ import { getAnthropicKey, getModel } from './env';
 import { loadMemory } from './memory';
 import { recordUsage, type Conversation, type Document, type Message as DbMessage } from './db';
 import { computeCostMicros, type TokenUsage } from './pricing';
-import { executeTool, loadAllTools } from './tools';
+import { executeTool, loadAllTools, loadFreeModeTools } from './tools';
 import { streamGroqReply } from './groq';
 
 // Persiste un appel Anthropic dans la table `usage` pour le cost tracking.
@@ -53,9 +53,15 @@ const TOOLS_SECTION = `Tu disposes de tools (function calling) :
 
 Tu n'as pas besoin d'annoncer chaque tool call ; agis et continue.`;
 
-// Mode "rapide" : on prévient Galaxia qu'elle tourne sur un modèle léger sans outils,
-// pour qu'elle invite Jeff à passer en mode Opus si la tâche dépasse le chat simple.
-const FREE_MODE_NOTE = `Tu tournes en mode "rapide" sur un modèle léger et gratuit, sans aucun outil (pas d'accès fichiers, pas de mémoire persistante, pas de briefs). C'est fait pour les petites tâches et le chat courant. Si Jeff demande quelque chose qui nécessite de lire un fichier du projet, d'écrire en mémoire, ou un raisonnement lourd, dis-lui en une phrase de basculer en mode Opus (bouton modèle dans le composer).`;
+// Mode "rapide" / gratuit : depuis 2026-05-30 (choix Jeff) il a des outils EN LECTURE
+// (filesystem read-only sur le repo + briefs + mémoire). On le lui annonce, et on
+// précise qu'il ne peut PAS écrire dans le repo (coder = mode Opus).
+const FREE_MODE_NOTE = `Tu tournes en mode "rapide" (modèle léger et gratuit), mais tu disposes d'outils EN LECTURE :
+- update_memory : note PROACTIVEMENT ce qu'il faut retenir entre sessions (préférence, projet, contact, décision). N'attends pas la permission, écris la note et continue.
+- read_brief / list_briefs : pour récupérer un brief du pipeline digest si Jeff y fait référence ou si c'est utile.
+- Filesystem (via MCP, LECTURE SEULE) : tu peux lire et explorer les fichiers de /home/galaxia/galaxia-project (le repo Galaxia), des briefs et de la knowledge base. Sers-t'en dès que Jeff te demande d'aller voir un fichier, d'expliquer une partie du projet, ou de chercher quelque chose dans le code.
+
+Tu ne peux PAS modifier de fichiers du repo en mode rapide (lecture seule). Si Jeff veut éditer, coder, ou une tâche lourde, dis-lui en une phrase de basculer en mode Opus (bouton modèle dans la barre de saisie). N'annonce pas chaque tool call ; agis et continue.`;
 
 export type ChatMode = 'pro' | 'free';
 
@@ -97,9 +103,9 @@ export function buildSystemPrompt(
 	const base =
 		mode === 'pro' ? `${BASE_SYSTEM_CORE}\n\n${TOOLS_SECTION}` : `${BASE_SYSTEM_CORE}\n\n${FREE_MODE_NOTE}`;
 	const parts = [base, buildDateLine()];
-	// La mémoire persistante n'est servie qu'en mode pro : en mode gratuit on annonce
-	// justement à Galaxia qu'elle n'y a pas accès (et update_memory n'existe pas).
-	const memory = mode === 'pro' ? loadMemory() : '';
+	// La mémoire persistante est servie dans les deux modes : depuis 2026-05-30 le
+	// mode gratuit a aussi update_memory + accès lecture, donc il doit voir l'existant.
+	const memory = loadMemory();
 	if (memory) {
 		parts.push(`---\n\nMémoire persistante (édite via le fichier memory.md sur le serveur) :\n\n${memory}`);
 	}
@@ -272,11 +278,13 @@ export async function* streamReply(
 	const convId = conversation?.id ?? null;
 	const system = buildSystemPrompt(conversation, mode);
 
-	// Mode "rapide" / gratuit : Groq, chat nu (pas d'outils, pas de documents/vision).
-	// On délègue entièrement au générateur Groq et on s'arrête là.
+	// Mode "rapide" / gratuit : Groq + outils EN LECTURE (filesystem read-only, briefs,
+	// mémoire). Pas de documents/vision (le chat free ignore les pièces jointes). On
+	// délègue au générateur Groq, qui déroule sa propre boucle tool_use → tool_result.
 	if (mode === 'free') {
 		const turns = buildClaudeMessages(conversation, history);
-		yield* streamGroqReply(system, turns, userId, convId);
+		const freeTools = await loadFreeModeTools();
+		yield* streamGroqReply(system, turns, userId, convId, freeTools);
 		return;
 	}
 
