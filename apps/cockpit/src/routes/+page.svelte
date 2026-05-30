@@ -1168,20 +1168,19 @@
 		return Array.from({ length: n }, (_, i) => i + 1).join('\n');
 	}
 
-	// ─── Rendu inline du document dans l'onglet Doc (refinement WS) ──────────
-	// PDF / images / markdown → iframe (le markdown reste rendu côté serveur dans
-	// une iframe sandboxée, cf. /api/documents/[id] : pas d'HTML arbitraire injecté
-	// dans l'origine du cockpit). Code / texte → rendu inline coloré (échappé).
-	let docInline = $state<{ content: string; filename: string } | null>(null);
+	// ─── Rendu inline du document dans l'onglet Doc ──────────────────────────
+	// Seuls les binaires (PDF, images) passent encore par l'iframe native.
+	// Markdown → HTML assaini côté serveur (renderMarkdownSafe, cf.
+	// $lib/server/markdown) rendu inline via {@html}. Code / texte → rendu inline
+	// coloré (échappé). Plus aucun document texte/markdown en iframe.
+	let docInline = $state<{ content: string; filename: string; html?: string } | null>(null);
 	let docInlineLoading = $state(false);
 	function docUsesIframe(doc: DocChip): boolean {
-		const mt = doc.mime_type;
-		const isMd = mt.includes('markdown') || doc.filename.toLowerCase().endsWith('.md');
-		return mt === 'application/pdf' || mt.startsWith('image/') || isMd;
+		return doc.mime_type === 'application/pdf' || doc.mime_type.startsWith('image/');
 	}
 	async function loadDocInline(doc: DocChip) {
 		docInline = null;
-		if (docUsesIframe(doc)) return; // chemin iframe
+		if (docUsesIframe(doc)) return; // binaires → iframe
 		docInlineLoading = true;
 		try {
 			const res = await fetch(
@@ -1189,7 +1188,7 @@
 			);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const body = await res.json();
-			docInline = { content: body.content ?? '', filename: doc.filename };
+			docInline = { content: body.content ?? '', filename: doc.filename, html: body.html };
 		} catch {
 			docInline = null; // on retombera sur l'iframe en cas d'échec
 		} finally {
@@ -1835,6 +1834,12 @@
 					></iframe>
 				{:else if docInlineLoading}
 					<p class="empty">Chargement…</p>
+				{:else if docInline?.html !== undefined}
+					<!-- markdown : HTML assaini côté serveur (renderMarkdownSafe) -->
+					<div class="md-rendered">
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+						{@html docInline.html}
+					</div>
 				{:else if docInline}
 					{@render codeBlock(docInline.content, docInline.filename)}
 				{:else}
@@ -2925,6 +2930,99 @@
 		width: 100%;
 		border: none;
 		background: var(--g-bg);
+	}
+	/* Rendu markdown inline (HTML assaini par renderMarkdownSafe). Mêmes accents
+	   que la preview iframe historique, mais via les variables du thème. */
+	.md-rendered {
+		flex: 1;
+		overflow: auto;
+		padding: 1.5rem 1.5rem 2.5rem;
+		color: var(--g-fg);
+		line-height: 1.6;
+		font-size: 0.92rem;
+		word-wrap: break-word;
+	}
+	.md-rendered :global(h1) {
+		font-size: 1.5rem;
+		margin: 0 0 1rem;
+		letter-spacing: -0.01em;
+	}
+	.md-rendered :global(h2) {
+		font-size: 1.15rem;
+		color: var(--g-primary);
+		margin: 1.6rem 0 0.5rem;
+		border-bottom: 1px solid var(--g-primary-15);
+		padding-bottom: 0.3rem;
+	}
+	.md-rendered :global(h3) {
+		font-size: 1rem;
+		margin: 1.1rem 0 0.4rem;
+	}
+	.md-rendered :global(p) {
+		margin: 0 0 0.9rem;
+	}
+	.md-rendered :global(a) {
+		color: var(--g-primary);
+		text-decoration: underline;
+		text-decoration-color: var(--g-primary-50);
+	}
+	.md-rendered :global(a:hover) {
+		text-decoration-color: var(--g-primary);
+	}
+	.md-rendered :global(ul),
+	.md-rendered :global(ol) {
+		padding-left: 1.4rem;
+		margin: 0 0 0.9rem;
+	}
+	.md-rendered :global(li) {
+		margin-bottom: 0.35rem;
+	}
+	.md-rendered :global(code) {
+		background: var(--g-primary-10);
+		padding: 0.12rem 0.35rem;
+		border-radius: 4px;
+		font-family: var(--g-font-mono);
+		font-size: 0.88em;
+	}
+	.md-rendered :global(pre) {
+		background: var(--g-surface);
+		border: 1px solid var(--g-primary-15);
+		border-radius: 8px;
+		padding: 1rem;
+		overflow-x: auto;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.md-rendered :global(pre code) {
+		background: none;
+		padding: 0;
+	}
+	.md-rendered :global(blockquote) {
+		border-left: 3px solid var(--g-primary-50);
+		padding-left: 0.9rem;
+		margin-left: 0;
+		color: var(--g-fg-muted);
+		font-style: italic;
+	}
+	.md-rendered :global(hr) {
+		border: none;
+		border-top: 1px solid var(--g-primary-15);
+		margin: 1.5rem 0;
+	}
+	.md-rendered :global(img) {
+		max-width: 100%;
+		height: auto;
+	}
+	.md-rendered :global(table) {
+		border-collapse: collapse;
+		margin: 0 0 0.9rem;
+		font-size: 0.88em;
+	}
+	.md-rendered :global(th),
+	.md-rendered :global(td) {
+		border: 1px solid var(--g-primary-15);
+		padding: 0.35rem 0.6rem;
+		text-align: left;
 	}
 
 	/* — Onglets Arfa (Doc / Code) — */
