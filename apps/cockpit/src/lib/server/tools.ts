@@ -219,3 +219,33 @@ export async function loadAllTools(): Promise<GalaxiaTool[]> {
 	const mcp = await listMcpTools();
 	return [...GALAXIA_TOOLS, ...mcp];
 }
+
+// Outils MCP autorisés en mode gratuit (Groq). Choix Jeff 2026-05-30 : le mode
+// rapide a un accès LECTURE au repo (pas d'écriture — coder = mode Opus). On
+// liste explicitement les tools non-mutants plutôt qu'un block-list, pour qu'un
+// nouveau tool d'écriture ajouté côté MCP ne fuite pas par défaut dans le gratuit.
+const FREE_MODE_MCP_READ_TOOLS = new Set([
+	// server-filesystem — lecture / exploration uniquement (pas write_file,
+	// edit_file, create_directory, move_file).
+	'read_file',
+	'read_text_file',
+	'read_media_file',
+	'list_directory',
+	'list_directory_with_sizes',
+	'directory_tree',
+	'search_files',
+	'get_file_info',
+	'list_allowed_directories',
+	// server-brave-search — recherche web (lecture).
+	'brave_web_search',
+	'brave_local_search'
+]);
+
+// Outils du mode gratuit : natifs (update_memory écrit seulement dans memory.md,
+// read_brief/list_briefs en lecture) + MCP filtrés en lecture seule. Donne au chat
+// par défaut l'accès au projet Galaxia sans coût premium ni capacité d'écriture repo.
+export async function loadFreeModeTools(): Promise<GalaxiaTool[]> {
+	const mcp = await listMcpTools();
+	const readMcp = mcp.filter((t) => FREE_MODE_MCP_READ_TOOLS.has(t.name));
+	return [...GALAXIA_TOOLS, ...readMcp];
+}

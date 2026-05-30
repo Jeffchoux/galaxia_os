@@ -149,6 +149,7 @@
 	// fermés au clic ailleurs (cf. <svelte:window onclick={closeMenus}>).
 	let agirOpen = $state(false);
 	let projOpen = $state(false);
+	let modelOpen = $state(false);
 
 	// Projet courant : celui de la conversation active si elle existe, sinon le
 	// projet « en attente » qui sera appliqué à la création (pendingProjectId).
@@ -169,6 +170,7 @@
 	function closeMenus() {
 		agirOpen = false;
 		projOpen = false;
+		modelOpen = false;
 	}
 
 	// ─── Vue Code (WS4) — arborescence read-only du repo dans le panneau Arfa ─
@@ -1656,7 +1658,28 @@
 							>
 								<span class="mi-ico">&lt;/&gt;</span> Voir le code
 							</button>
-							<div class="menu-sep">Modèle</div>
+						</div>
+					{/if}
+				</div>
+				<div class="menu-wrap">
+					<button
+						type="button"
+						class="agir model-trigger"
+						class:open={modelOpen}
+						class:pro={chatMode === 'pro'}
+						onclick={(e) => {
+							e.stopPropagation();
+							modelOpen = !modelOpen;
+							agirOpen = false;
+							projOpen = false;
+						}}
+						disabled={sending}
+						aria-haspopup="menu"
+						aria-expanded={modelOpen}
+						title="Choisir le modèle : Rapide (gratuit, accès lecture au projet) ou Opus 4.8 (complet, peut coder)"
+					>{chatMode === 'pro' ? '🧠 Opus' : '⚡ Rapide'}</button>
+					{#if modelOpen}
+						<div class="menu" role="menu">
 							<button
 								type="button"
 								class="menu-item"
@@ -1664,10 +1687,14 @@
 								aria-checked={chatMode === 'free'}
 								onclick={() => {
 									chatMode = 'free';
-									agirOpen = false;
+									modelOpen = false;
 								}}
 							>
-								<span class="mi-ico">⚡</span> Rapide (gratuit)
+								<span class="mi-ico">⚡</span>
+								<span class="mi-body">
+									<span class="mi-title">Rapide — gratuit</span>
+									<span class="mi-sub">Accès lecture au projet. Pour les questions et le chat courant.</span>
+								</span>
 								{#if chatMode === 'free'}<span class="mi-check">✓</span>{/if}
 							</button>
 							<button
@@ -1677,10 +1704,14 @@
 								aria-checked={chatMode === 'pro'}
 								onclick={() => {
 									chatMode = 'pro';
-									agirOpen = false;
+									modelOpen = false;
 								}}
 							>
-								<span class="mi-ico">🧠</span> Opus 4.8
+								<span class="mi-ico">🧠</span>
+								<span class="mi-body">
+									<span class="mi-title">Opus 4.8 — payant</span>
+									<span class="mi-sub">Complet : peut coder, écrire des fichiers, raisonner lourd.</span>
+								</span>
 								{#if chatMode === 'pro'}<span class="mi-check">✓</span>{/if}
 							</button>
 						</div>
@@ -2792,6 +2823,38 @@
 		background: var(--g-primary);
 		border-color: var(--g-primary);
 		color: #fff;
+	}
+	/* Sélecteur de modèle toujours visible : le mode courant est lisible d'un coup
+	   d'œil. En mode Opus (payant), accent plein pour signaler le coût. */
+	.model-trigger {
+		font-variant-emoji: text;
+	}
+	.model-trigger.pro {
+		background: var(--g-primary);
+		border-color: var(--g-primary);
+		color: #fff;
+	}
+	.model-trigger.pro:hover:not(:disabled),
+	.model-trigger.pro.open {
+		background: var(--g-primary);
+		color: #fff;
+		filter: brightness(0.93);
+	}
+	/* Items du menu modèle : titre + sous-titre sur deux lignes. */
+	.mi-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		min-width: 0;
+	}
+	.mi-title {
+		font-weight: 600;
+	}
+	.mi-sub {
+		font-size: 0.72rem;
+		color: var(--g-fg-faint);
+		white-space: normal;
+		line-height: 1.25;
 	}
 	.menu {
 		position: absolute;
