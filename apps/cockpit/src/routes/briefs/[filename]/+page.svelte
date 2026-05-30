@@ -39,15 +39,9 @@
 <style>
 	:global(body) {
 		margin: 0;
-		background: #07060c;
-		color: #e9e9f4;
-		font-family:
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			Segoe UI,
-			Roboto,
-			sans-serif;
+		background: var(--g-bg);
+		color: var(--g-fg);
+		font-family: var(--g-font);
 		min-height: 100vh;
 		line-height: 1.6;
 	}
@@ -60,15 +54,15 @@
 		margin-bottom: 1.5rem;
 	}
 	.back {
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		font-size: 0.9rem;
 	}
 	.back:hover {
-		color: #fff;
+		color: var(--g-fg);
 	}
 	.date {
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		font-size: 0.85rem;
 		margin-top: 0.5rem;
 		text-transform: capitalize;
@@ -84,8 +78,8 @@
 		font-size: 1.25rem;
 		margin: 2rem 0 0.75rem;
 		font-weight: 600;
-		color: #c084fc;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+		color: var(--g-primary);
+		border-bottom: 1px solid var(--g-primary-20);
 		padding-bottom: 0.4rem;
 	}
 	.brief :global(h3) {
@@ -95,41 +89,41 @@
 	}
 	.brief :global(p) {
 		margin: 0 0 1rem;
-		color: #d9d9eb;
+		color: var(--g-fg);
 	}
 	.brief :global(strong) {
-		color: #fff;
+		color: var(--g-fg);
 	}
 	.brief :global(em) {
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		font-style: normal;
 		font-size: 0.875rem;
 	}
 	.brief :global(a) {
-		color: #c084fc;
+		color: var(--g-primary);
 		text-decoration: underline;
-		text-decoration-color: rgba(192, 132, 252, 0.4);
+		text-decoration-color: var(--g-primary-50);
 	}
 	.brief :global(a:hover) {
-		text-decoration-color: #c084fc;
+		text-decoration-color: var(--g-primary);
 	}
 	.brief :global(ul),
 	.brief :global(ol) {
 		padding-left: 1.5rem;
-		color: #d9d9eb;
+		color: var(--g-fg);
 	}
 	.brief :global(li) {
 		margin-bottom: 0.5rem;
 	}
 	.brief :global(code) {
-		background: rgba(124, 58, 237, 0.15);
+		background: var(--g-primary-15);
 		padding: 0.15rem 0.4rem;
 		border-radius: 4px;
 		font-size: 0.875em;
 	}
 	.brief :global(pre) {
-		background: rgba(20, 18, 32, 0.7);
-		border: 1px solid rgba(124, 58, 237, 0.2);
+		background: var(--g-surface);
+		border: 1px solid var(--g-primary-20);
 		border-radius: 8px;
 		padding: 1rem;
 		overflow-x: auto;
@@ -139,15 +133,15 @@
 		padding: 0;
 	}
 	.brief :global(blockquote) {
-		border-left: 3px solid rgba(124, 58, 237, 0.6);
+		border-left: 3px solid var(--g-primary-50);
 		padding-left: 1rem;
 		margin-left: 0;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		font-style: italic;
 	}
 	.brief :global(hr) {
 		border: none;
-		border-top: 1px solid rgba(124, 58, 237, 0.2);
+		border-top: 1px solid var(--g-primary-20);
 		margin: 2rem 0;
 	}
 </style>

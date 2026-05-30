@@ -145,15 +145,9 @@
 <style>
 	:global(body) {
 		margin: 0;
-		background: #07060c;
-		color: #e9e9f4;
-		font-family:
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			Segoe UI,
-			Roboto,
-			sans-serif;
+		background: var(--g-bg);
+		color: var(--g-fg);
+		font-family: var(--g-font);
 		min-height: 100vh;
 	}
 	.wrap {
@@ -165,14 +159,14 @@
 		margin-bottom: 1.5rem;
 	}
 	.back {
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		font-size: 0.9rem;
 		display: inline-block;
 		margin-bottom: 1rem;
 	}
 	.back:hover {
-		color: #fff;
+		color: var(--g-fg);
 	}
 	h1 {
 		margin: 0 0 0.5rem;
@@ -181,13 +175,13 @@
 	}
 	.sub {
 		margin: 0;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		font-size: 0.9rem;
 	}
 
 	.table-wrap {
-		background: rgba(20, 18, 32, 0.4);
-		border: 1px solid rgba(124, 58, 237, 0.15);
+		background: var(--g-surface);
+		border: 1px solid var(--g-primary-15);
 		border-radius: 12px;
 		overflow: hidden;
 	}
@@ -199,17 +193,17 @@
 	thead th {
 		text-align: left;
 		padding: 0.75rem 0.85rem;
-		background: rgba(20, 18, 32, 0.7);
-		color: #b9b9d0;
+		background: var(--g-surface);
+		color: var(--g-fg-muted);
 		font-weight: 600;
 		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+		border-bottom: 1px solid var(--g-primary-20);
 	}
 	tbody td {
 		padding: 0.6rem 0.85rem;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.08);
+		border-bottom: 1px solid var(--g-primary-08);
 		vertical-align: middle;
 	}
 	tbody tr.row {
@@ -217,7 +211,7 @@
 		transition: background 0.1s;
 	}
 	tbody tr.row:hover {
-		background: rgba(124, 58, 237, 0.08);
+		background: var(--g-primary-08);
 	}
 	.col-icon {
 		width: 32px;
@@ -225,18 +219,18 @@
 	}
 	.col-name {
 		font-weight: 500;
-		color: #fff;
+		color: var(--g-fg);
 		max-width: 320px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.col-meta {
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		white-space: nowrap;
 	}
 	.col-conv a {
-		color: #c084fc;
+		color: var(--g-primary);
 		text-decoration: none;
 	}
 	.col-conv a:hover {
@@ -249,7 +243,7 @@
 	.empty {
 		text-align: center;
 		padding: 4rem 1rem;
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 	}
 	.empty .hint {
 		font-size: 0.875rem;
@@ -261,7 +255,7 @@
 	.preview-backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(5, 5, 12, 0.78);
+		background: rgba(0, 0, 0, 0.4);
 		backdrop-filter: blur(4px);
 		display: grid;
 		place-items: center;
@@ -273,8 +267,8 @@
 		flex-direction: column;
 		width: min(900px, 96vw);
 		height: min(85vh, 900px);
-		background: #0c0a18;
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-primary-30);
 		border-radius: 12px;
 		overflow: hidden;
 	}
@@ -283,8 +277,8 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid rgba(124, 58, 237, 0.2);
-		background: rgba(20, 18, 32, 0.5);
+		border-bottom: 1px solid var(--g-primary-20);
+		background: var(--g-surface);
 	}
 	.preview-icon {
 		font-size: 1.1rem;
@@ -295,10 +289,10 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-weight: 500;
-		color: #fff;
+		color: var(--g-fg);
 	}
 	.preview-meta {
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 		font-size: 0.8rem;
 	}
 	.preview-dl,
@@ -307,9 +301,9 @@
 		height: 2rem;
 		display: grid;
 		place-items: center;
-		background: rgba(124, 58, 237, 0.15);
-		color: #b9b9d0;
-		border: 1px solid rgba(124, 58, 237, 0.25);
+		background: var(--g-primary-15);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
 		border-radius: 6px;
 		text-decoration: none;
 		font-size: 1.1rem;
@@ -318,13 +312,13 @@
 	}
 	.preview-dl:hover,
 	.preview-close:hover {
-		background: rgba(124, 58, 237, 0.3);
-		color: #fff;
+		background: var(--g-primary-30);
+		color: var(--g-fg);
 	}
 	.preview-iframe {
 		flex: 1;
 		width: 100%;
 		border: none;
-		background: #07060c;
+		background: var(--g-bg);
 	}
 </style>

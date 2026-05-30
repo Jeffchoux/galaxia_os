@@ -111,15 +111,9 @@
 <style>
 	:global(body) {
 		margin: 0;
-		background: radial-gradient(circle at 30% 20%, #1a0e2e 0%, #05050a 60%);
-		color: #e9e9f4;
-		font-family:
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			Segoe UI,
-			Roboto,
-			sans-serif;
+		background: radial-gradient(circle at 30% 20%, #fdf0ec 0%, #f5f5f5 60%);
+		color: var(--g-fg);
+		font-family: var(--g-font);
 		min-height: 100vh;
 	}
 	.wrap {
@@ -131,12 +125,11 @@
 	.card {
 		width: 100%;
 		max-width: 380px;
-		background: rgba(20, 18, 32, 0.6);
-		backdrop-filter: blur(12px);
-		border: 1px solid rgba(124, 58, 237, 0.25);
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-border);
 		border-radius: 16px;
 		padding: 2rem;
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
 	}
 	h1 {
 		margin: 0 0 0.25rem;
@@ -145,7 +138,7 @@
 	}
 	.sub {
 		margin: 0 0 1.5rem;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		font-size: 0.9rem;
 	}
 	label {
@@ -155,28 +148,28 @@
 	label span {
 		display: block;
 		font-size: 0.85rem;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		margin-bottom: 0.4rem;
 	}
 	input {
 		width: 100%;
 		box-sizing: border-box;
 		padding: 0.7rem 0.9rem;
-		background: rgba(10, 10, 20, 0.6);
-		border: 1px solid rgba(124, 58, 237, 0.3);
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-border-strong);
 		border-radius: 8px;
-		color: #fff;
+		color: var(--g-fg);
 		font-size: 1rem;
 		font-family: inherit;
 	}
 	input:focus {
 		outline: none;
-		border-color: #7c3aed;
+		border-color: var(--g-primary);
 	}
 	button[type='submit'] {
 		width: 100%;
 		padding: 0.75rem;
-		background: #7c3aed;
+		background: var(--g-primary);
 		color: white;
 		border: none;
 		border-radius: 8px;
@@ -186,13 +179,14 @@
 		transition: background 0.15s;
 	}
 	button[type='submit']:hover {
-		background: #6d28d9;
+		background: var(--g-primary-hover);
 	}
 	button[type='submit'].admin {
-		background: #3b3b55;
+		background: #e5e5e5;
+		color: var(--g-fg);
 	}
 	button[type='submit'].admin:hover {
-		background: #4a4a6e;
+		background: #d6d6d6;
 	}
 	.toggle {
 		display: block;
@@ -200,7 +194,7 @@
 		text-align: center;
 		background: none;
 		border: none;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		font-size: 0.8rem;
 		margin-top: 1.25rem;
 		padding: 0.5rem;
@@ -208,36 +202,36 @@
 		font-family: inherit;
 	}
 	.toggle:hover {
-		color: #b9b9d0;
+		color: var(--g-fg);
 	}
 	.secondary {
 		margin-top: 1rem;
 		padding-top: 1rem;
-		border-top: 1px solid rgba(124, 58, 237, 0.15);
+		border-top: 1px solid var(--g-border);
 	}
 	.error {
-		color: #f87171;
+		color: var(--g-state-error);
 		font-size: 0.875rem;
 		margin: 0 0 1rem;
 	}
 	.hint {
 		font-size: 0.8rem;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		margin: 0.75rem 0 0;
 		line-height: 1.4;
 	}
 	.sent {
-		background: rgba(52, 211, 153, 0.1);
-		border: 1px solid rgba(52, 211, 153, 0.3);
+		background: rgba(21, 163, 74, 0.1);
+		border: 1px solid rgba(21, 163, 74, 0.3);
 		border-radius: 8px;
 		padding: 1rem;
-		color: #d1fae5;
+		color: #0a7d34;
 	}
 	.sent p {
 		margin: 0 0 0.5rem;
 	}
 	.sent .hint {
 		margin: 0;
-		color: #94a3a8;
+		color: #15803d;
 	}
 </style>
