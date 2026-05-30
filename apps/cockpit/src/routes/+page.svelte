@@ -181,6 +181,29 @@
 	let codeLoading = $state(false);
 	let codeError = $state<string | null>(null);
 	let codeExpanded = $state<Set<string>>(new Set());
+	// Confort de lecture (Vue Code read-only) : recherche par chemin, retour à la
+	// ligne (persisté en localStorage), feedback transitoire du bouton copier.
+	let codeQuery = $state('');
+	let codeWrap = $state(false);
+	let codeCopied = $state(false);
+
+	// Aplati les fichiers de l'arbre pour la recherche (la recherche bascule d'une
+	// vue arborescente vers une liste plate des chemins qui matchent).
+	function flattenFiles(nodes: CodeNode[], acc: CodeNode[] = []): CodeNode[] {
+		for (const n of nodes) {
+			if (n.type === 'file') acc.push(n);
+			else if (n.children) flattenFiles(n.children, acc);
+		}
+		return acc;
+	}
+	const CODE_MATCH_LIMIT = 200;
+	const codeMatchesAll = $derived.by(() => {
+		const q = codeQuery.trim().toLowerCase();
+		if (!q || !codeTree?.available) return [] as CodeNode[];
+		return flattenFiles(codeTree.nodes).filter((f) => f.path.toLowerCase().includes(q));
+	});
+	const codeMatches = $derived(codeMatchesAll.slice(0, CODE_MATCH_LIMIT));
+	const codeMatchesTruncated = $derived(codeMatchesAll.length > CODE_MATCH_LIMIT);
 
 	// État de la session OpenAI Realtime (D8). `realtimeHandle` est null tant
 	// qu'aucune session WebRTC n'est ouverte ; il est posé par startRealtime()
@@ -208,6 +231,7 @@
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 			const cm = localStorage.getItem('galaxia.chatMode');
 			if (cm === 'pro' || cm === 'free') chatMode = cm;
+			codeWrap = localStorage.getItem('galaxia.codeWrap') === '1';
 			const cp = localStorage.getItem('galaxia.collapsedProjects');
 			if (cp) collapsedProjects = new Set(JSON.parse(cp) as string[]);
 		} catch {
@@ -278,6 +302,7 @@
 				localStorage.setItem('galaxia.ttsBackend', ttsBackend);
 				localStorage.setItem('galaxia.sttBackend', sttBackend);
 				localStorage.setItem('galaxia.chatMode', chatMode);
+				localStorage.setItem('galaxia.codeWrap', codeWrap ? '1' : '0');
 			}
 		} catch {
 			/* idem */
@@ -1124,6 +1149,18 @@
 		await loadCodeTree();
 		if (codeFile) await openCodeFile(codeFile.path);
 	}
+	let codeCopyTimer: ReturnType<typeof setTimeout> | null = null;
+	async function copyCode() {
+		if (!codeFile) return;
+		try {
+			await navigator.clipboard.writeText(codeFile.content);
+			codeCopied = true;
+			if (codeCopyTimer) clearTimeout(codeCopyTimer);
+			codeCopyTimer = setTimeout(() => (codeCopied = false), 1500);
+		} catch {
+			/* presse-papier indisponible (contexte non sécurisé) */
+		}
+	}
 
 	// Colonne de numéros de ligne pour un bloc de code (alignée par CSS, pas de wrap).
 	function lineNumbers(s: string): string {
@@ -1778,8 +1815,8 @@
 				{/if}
 			</header>
 
-			{#snippet codeBlock(content: string, path: string)}
-				<div class="code-scroll">
+			{#snippet codeBlock(content: string, path: string, wrap = false)}
+				<div class="code-scroll" class:wrap>
 					<pre class="gutter" aria-hidden="true">{lineNumbers(content)}</pre>
 					<pre class="code-block"><code>{@html highlightCode(content, path)}</code></pre>
 				</div>
@@ -1838,6 +1875,25 @@
 
 				<div class="code-pane">
 					<div class="code-tree">
+						{#if codeTree?.available}
+							<div class="code-search">
+								<input
+									class="code-search-input"
+									type="search"
+									placeholder="Rechercher un fichier…"
+									bind:value={codeQuery}
+								/>
+								{#if codeQuery}
+									<button
+										type="button"
+										class="code-search-clear"
+										onclick={() => (codeQuery = '')}
+										title="Effacer"
+										aria-label="Effacer la recherche">×</button
+									>
+								{/if}
+							</div>
+						{/if}
 						{#if codeLoading && !codeTree}
 							<p class="empty">Chargement…</p>
 						{/if}
@@ -1846,9 +1902,29 @@
 						{/if}
 						{#if codeTree?.available}
 							<div class="code-root">{codeTree.root}</div>
-							{@render tree(codeTree.nodes, 0)}
-							{#if codeTree.truncated}
-								<p class="empty sub">Arbre tronqué (trop de fichiers).</p>
+							{#if codeQuery.trim()}
+								{#if codeMatches.length === 0}
+									<p class="empty sub">Aucun fichier ne correspond.</p>
+								{:else}
+									{#each codeMatches as m (m.path)}
+										<button
+											class="code-row file"
+											class:active={codeFile?.path === m.path}
+											onclick={() => openCodeFile(m.path)}
+											title={m.path}
+										>
+											<span class="code-name">{m.path}</span>
+										</button>
+									{/each}
+									{#if codeMatchesTruncated}
+										<p class="empty sub">… liste tronquée ({CODE_MATCH_LIMIT} max).</p>
+									{/if}
+								{/if}
+							{:else}
+								{@render tree(codeTree.nodes, 0)}
+								{#if codeTree.truncated}
+									<p class="empty sub">Arbre tronqué (trop de fichiers).</p>
+								{/if}
 							{/if}
 						{/if}
 					</div>
@@ -1856,11 +1932,36 @@
 						{#if codeError && codeTree?.available}
 							<p class="empty err">{codeError}</p>
 						{:else if codeFile}
+							{@const segs = codeFile.path.split('/')}
 							<div class="code-file-head">
-								<span class="cf-path">{codeFile.path}</span>
-								<span class="cf-meta">{codeFile.lines} lignes</span>
+								<span class="cf-path">
+									{#each segs as seg, i (i)}
+										{#if i > 0}<span class="cf-sep">›</span>{/if}<span
+											class="cf-seg"
+											class:last={i === segs.length - 1}>{seg}</span
+										>
+									{/each}
+								</span>
+								<div class="cf-actions">
+									<span class="cf-meta">{codeFile.lines} lignes</span>
+									<button
+										type="button"
+										class="cf-btn"
+										class:on={codeWrap}
+										onclick={() => (codeWrap = !codeWrap)}
+										title="Retour à la ligne"
+										aria-pressed={codeWrap}>↩</button
+									>
+									<button
+										type="button"
+										class="cf-btn"
+										onclick={copyCode}
+										title="Copier le contenu du fichier"
+										aria-label="Copier le contenu du fichier">{codeCopied ? '✓' : '⧉'}</button
+									>
+								</div>
 							</div>
-							{@render codeBlock(codeFile.content, codeFile.path)}
+							{@render codeBlock(codeFile.content, codeFile.path, codeWrap)}
 						{:else}
 							<p class="empty">Sélectionne un fichier à gauche.</p>
 						{/if}
@@ -2949,6 +3050,81 @@
 		color: var(--g-fg-faint);
 		flex-shrink: 0;
 	}
+	/* Fil d'Ariane du chemin : dernier segment (le fichier) mis en avant. */
+	.cf-sep {
+		color: var(--g-fg-faint);
+		margin: 0 0.2rem;
+	}
+	.cf-seg {
+		color: var(--g-fg-muted);
+	}
+	.cf-seg.last {
+		color: var(--g-fg);
+		font-weight: 600;
+	}
+	.cf-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-shrink: 0;
+	}
+	.cf-btn {
+		display: grid;
+		place-items: center;
+		width: 1.7rem;
+		height: 1.7rem;
+		padding: 0;
+		background: var(--g-primary-10);
+		color: var(--g-fg-muted);
+		border: 1px solid var(--g-primary-25);
+		border-radius: 6px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.cf-btn:hover {
+		background: var(--g-primary-25);
+		color: var(--g-fg);
+	}
+	.cf-btn.on {
+		background: var(--g-primary);
+		border-color: var(--g-primary);
+		color: #fff;
+	}
+	/* Recherche de fichier : filtre l'arbre vers une liste plate de chemins. */
+	.code-search {
+		position: relative;
+		padding: 0.3rem 0.35rem 0.45rem;
+	}
+	.code-search-input {
+		width: 100%;
+		padding: 0.35rem 1.6rem 0.35rem 0.5rem;
+		background: var(--g-surface-raised);
+		border: 1px solid var(--g-border);
+		border-radius: 6px;
+		color: var(--g-fg);
+		font-size: 0.78rem;
+		font-family: inherit;
+	}
+	.code-search-input:focus {
+		outline: none;
+		border-color: var(--g-primary);
+	}
+	.code-search-clear {
+		position: absolute;
+		right: 0.6rem;
+		top: 50%;
+		transform: translateY(-50%);
+		background: none;
+		border: none;
+		color: var(--g-fg-faint);
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.code-search-clear:hover {
+		color: var(--g-fg);
+	}
 	.code-scroll {
 		flex: 1;
 		overflow: auto;
@@ -2987,6 +3163,16 @@
 	.code-scroll .code-block code {
 		font: inherit;
 		background: none;
+	}
+	/* Retour à la ligne (toggle ↩) : on enveloppe les lignes longues. Le gutter
+	   est masqué dans ce mode car 1 ligne source ≠ 1 ligne affichée (les numéros
+	   ne s'aligneraient plus). */
+	.code-scroll.wrap .code-block {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.code-scroll.wrap .gutter {
+		display: none;
 	}
 	/* Tokens (coloration zéro-dép, cf. $lib/highlight.ts) */
 	:global(.tok-comment) {
