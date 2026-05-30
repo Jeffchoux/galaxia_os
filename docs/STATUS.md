@@ -1,7 +1,39 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-29** — **Galaxia 2.0 increment 2** livré et **déployé** (build + restart faits) : **WS3 Projets** (regroupement des conversations dans la sidebar) + **WS4 Vue Code** (onglet Code dans Arfa branché sur l'arborescence réelle du repo, lecture seule). Détail § « refonte UI » ci-dessous. Avant : voix cockpit **cross-browser par défaut** (cascade serveur Whisper + Kyutai) + **sélecteur de modèle** gratuit (Groq) / Opus à la demande. Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-30** — **bascule du thème cockpit en CLAIR + accent terracotta** (« copie conforme Claude »), build OK, **pas encore redéployé** (restart à faire). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Détail § « refonte UI » → « Thème clair terracotta » ci-dessous. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Thème clair terracotta — « copie conforme Claude » (2026-05-30, session root)
+
+**Renversement de cap assumé.** Le 2026-05-29 l'identité était volontairement
+**violette + sombre**, « distincte du terracotta de Claude ». Jeff a tranché ce jour
+(question explicite posée avant de toucher au code) : **thème clair, accent terracotta
+`#E8380D`, look copie conforme Claude**. Le mode « Cowork » du spec (tâches planifiées /
+actives) est **différé** (pas de backend de tâches à brancher pour l'instant — choix Jeff).
+
+Livré (build `svelte-check` 0 erreur, `vite build` OK ; **non redéployé**) :
+- **`src/lib/theme.css` réécrit** : mêmes noms de variables (`--g-primary`, `--g-bg`,
+  `--g-fg`…) → tous les consommateurs basculent d'un coup. Surfaces blanches
+  (`--g-bg #fff`, sidebar `--g-surface #f5f5f5`), texte sombre (`--g-fg #1a1a1a`),
+  bordures neutres (`#e5e5e5`), accent terracotta + tints, `color-scheme: light`,
+  palette de coloration syntaxique assombrie pour fond clair, états voix assombris.
+- **`+page.svelte`** : purge de tous les littéraux sombres/blancs hardcodés du `<style>`
+  (≈40 occurrences : textes blancs sur survols clairs → texte sombre, surfaces
+  `rgba(20,18,32,…)` → surfaces claires, glow violet realtime → terracotta, tokens
+  de coloration → vars claires). Aucune ligne de markup/script/logique touchée :
+  **zéro régression backend** (routes, auth, WS, voix, chat, projets, vue code intacts).
+- **Pages secondaires** passées en clair de la même façon : `login`, `documents`,
+  `briefs`, `briefs/[filename]`, + l'iframe d'aperçu document (`api/documents/[id]`
+  `color-scheme: light`, fond blanc). `app.html` → `data-theme="light"`.
+
+**Reste à faire :**
+1. `sudo systemctl restart galaxia-cockpit.service` pour déployer (Jeff ou session root).
+2. **Shell « copie conforme » plus poussé** (non fait, prochain incrément) : sélecteur
+   de mode **Chat / Code** en haut de sidebar (Cowork différé), dropdowns « Agir » et
+   « Travailler dans un projet » dans le footer d'input, éditeur de code (le spec
+   demandait Monaco ; la Vue Code actuelle reste en lecture seule). Le présent
+   incrément ne couvre que la **bascule design-system** (étapes 1-2 de l'ordre
+   d'exécution du spec : shell global + variables CSS appliquées, styles sombres purgés).
 
 ## Sélecteur de modèle chat : gratuit par défaut / Opus à la demande (2026-05-29, session root)
 

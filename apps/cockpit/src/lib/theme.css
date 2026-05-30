@@ -1,53 +1,69 @@
-/* Galaxia design tokens — identité violette, distincte du terracotta de Claude Code.
-   Centralise les couleurs jusqu'ici hardcodées dans +page.svelte. Toute nouvelle
-   surface doit consommer ces vars plutôt que des littéraux hex. */
+/* Galaxia design tokens — thème CLAIR « copie conforme Claude », accent terracotta.
+   (2026-05-30 : bascule depuis l'ancienne identité violette/sombre — choix Jeff,
+   cf. docs/STATUS.md.) Les noms de variables sont conservés (--g-primary, --g-bg…)
+   pour que tous les consommateurs basculent d'un coup. Toute nouvelle surface doit
+   consommer ces vars plutôt que des littéraux hex. */
 
 :root {
-	/* Palette violette Galaxia */
-	--g-primary: #7c3aed;
-	--g-primary-light: #c084fc;
-	--g-primary-dark: #1a0e2e;
-	--g-primary-08: rgba(124, 58, 237, 0.08);
-	--g-primary-15: rgba(124, 58, 237, 0.15);
-	--g-primary-20: rgba(124, 58, 237, 0.2);
-	--g-primary-25: rgba(124, 58, 237, 0.25);
-	--g-primary-30: rgba(124, 58, 237, 0.3);
-	--g-primary-50: rgba(124, 58, 237, 0.5);
+	color-scheme: light;
 
-	/* Surfaces (du plus sombre au plus clair) */
-	--g-bg: #07060c;
-	--g-surface: #0c0a18;
-	--g-surface-raised: #120e22;
-	--g-surface-overlay: #161229;
+	/* Accent terracotta (Claude « Cowork » #E8380D) + tons dérivés.
+	   Les tints sont volontairement un peu opaques pour rester visibles sur blanc. */
+	--g-primary: #e8380d;
+	--g-primary-light: #f2603d; /* terracotta clair — accents sur fond clair */
+	--g-primary-dark: #b82b08; /* survol / pressé */
+	--g-primary-hover: #c8300b; /* survol des boutons pleins (submit) */
+	--g-primary-08: rgba(232, 56, 13, 0.07);
+	--g-primary-10: rgba(232, 56, 13, 0.1);
+	--g-primary-15: rgba(232, 56, 13, 0.12);
+	--g-primary-20: rgba(232, 56, 13, 0.16);
+	--g-primary-25: rgba(232, 56, 13, 0.22);
+	--g-primary-30: rgba(232, 56, 13, 0.32);
+	--g-primary-50: rgba(232, 56, 13, 0.5);
+
+	/* Surfaces (du plus clair fond au panneau) */
+	--g-bg: #ffffff; /* fond principal / chat */
+	--g-surface: #f5f5f5; /* sidebar */
+	--g-surface-raised: #ffffff; /* cartes input */
+	--g-surface-overlay: #ffffff;
 
 	/* Texte */
-	--g-fg: #e9e9f4;
-	--g-fg-muted: #b9b9d0;
-	--g-fg-faint: #6b6b85;
-	--g-fg-dim: #555;
+	--g-fg: #1a1a1a;
+	--g-fg-muted: #6b6b6b;
+	--g-fg-faint: #9b9b9b;
+	--g-fg-dim: #c2c2c2; /* numéros de ligne, séparateurs faibles */
 
-	/* Bordures */
-	--g-border: var(--g-primary-15);
-	--g-border-strong: var(--g-primary-30);
+	/* Bordures (neutres, façon Claude) */
+	--g-border: #e5e5e5;
+	--g-border-strong: #e0e0e0;
 
-	/* États voix / activité */
-	--g-state-listening: #34d399;
-	--g-state-thinking: #fbbf24;
-	--g-state-speaking: #60a5fa;
-	--g-state-error: #f87171;
+	/* États voix / activité (assombris pour fond clair) */
+	--g-state-listening: #15a34a;
+	--g-state-thinking: #d97706;
+	--g-state-speaking: #2563eb;
+	--g-state-error: #dc2626;
+
+	/* Coloration syntaxique (palette claire — cf. $lib/highlight.ts) */
+	--g-tok-comment: #8a8a8a;
+	--g-tok-string: #0a7d34;
+	--g-tok-keyword: #c2300b;
+	--g-tok-type: #0369a1;
+	--g-tok-number: #b45309;
+	--g-tok-tag: #a21caf;
 
 	/* Rayons */
 	--g-radius-sm: 6px;
 	--g-radius: 8px;
 	--g-radius-lg: 12px;
 
-	/* Ombres */
+	/* Ombres (douces, sur fond clair) */
 	--g-glow: 0 0 8px var(--g-primary-50);
-	--g-shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.35);
+	--g-shadow-panel: -8px 0 24px rgba(0, 0, 0, 0.08);
+	--g-shadow-input: 0 1px 4px rgba(0, 0, 0, 0.08);
 
 	/* Typo */
 	--g-font:
-		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+		-apple-system, BlinkMacSystemFont, ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
 	--g-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 
 	/* Layout */

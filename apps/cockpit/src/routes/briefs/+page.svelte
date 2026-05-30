@@ -64,15 +64,9 @@
 <style>
 	:global(body) {
 		margin: 0;
-		background: #07060c;
-		color: #e9e9f4;
-		font-family:
-			ui-sans-serif,
-			system-ui,
-			-apple-system,
-			Segoe UI,
-			Roboto,
-			sans-serif;
+		background: var(--g-bg);
+		color: var(--g-fg);
+		font-family: var(--g-font);
 		min-height: 100vh;
 	}
 	.wrap {
@@ -84,14 +78,14 @@
 		margin-bottom: 2rem;
 	}
 	.back {
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-decoration: none;
 		font-size: 0.9rem;
 		display: inline-block;
 		margin-bottom: 1rem;
 	}
 	.back:hover {
-		color: #fff;
+		color: var(--g-fg);
 	}
 	h1 {
 		margin: 0 0 0.5rem;
@@ -100,7 +94,7 @@
 	}
 	.sub {
 		margin: 0;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		font-size: 0.9rem;
 	}
 	.briefs {
@@ -112,8 +106,8 @@
 		gap: 0.75rem;
 	}
 	.briefs li {
-		background: rgba(20, 18, 32, 0.5);
-		border: 1px solid rgba(124, 58, 237, 0.2);
+		background: var(--g-surface);
+		border: 1px solid var(--g-primary-20);
 		border-radius: 12px;
 		transition: all 0.15s;
 	}
@@ -121,8 +115,8 @@
 		opacity: 0.55;
 	}
 	.briefs li:hover {
-		border-color: rgba(124, 58, 237, 0.5);
-		background: rgba(30, 25, 50, 0.6);
+		border-color: var(--g-primary-50);
+		background: var(--g-primary-08);
 	}
 	.briefs a {
 		display: block;
@@ -138,13 +132,13 @@
 	}
 	.date {
 		font-size: 0.8rem;
-		color: #b9b9d0;
+		color: var(--g-fg-muted);
 		text-transform: capitalize;
 	}
 	.tag {
 		font-size: 0.7rem;
-		background: rgba(248, 113, 113, 0.15);
-		color: #fca5a5;
+		background: rgba(220, 38, 38, 0.15);
+		color: #b91c1c;
 		padding: 0.1rem 0.4rem;
 		border-radius: 4px;
 		text-transform: uppercase;
@@ -153,13 +147,13 @@
 	.title {
 		font-size: 1.05rem;
 		font-weight: 500;
-		color: #fff;
+		color: var(--g-fg);
 		margin-bottom: 0.4rem;
 	}
 	.preview {
 		margin: 0;
 		font-size: 0.875rem;
-		color: #8e8ea8;
+		color: var(--g-fg-muted);
 		line-height: 1.5;
 		overflow: hidden;
 		display: -webkit-box;
@@ -170,7 +164,7 @@
 	.empty {
 		text-align: center;
 		padding: 4rem 1rem;
-		color: #6b6b85;
+		color: var(--g-fg-faint);
 	}
 	.empty .hint {
 		font-size: 0.875rem;
@@ -178,7 +172,7 @@
 		margin: 1rem auto 0;
 	}
 	code {
-		background: rgba(124, 58, 237, 0.2);
+		background: var(--g-primary-20);
 		padding: 0.1rem 0.4rem;
 		border-radius: 4px;
 		font-size: 0.85em;
