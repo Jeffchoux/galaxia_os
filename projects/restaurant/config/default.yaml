@@ -81,8 +81,15 @@ email:
   # Obligatoire dans CHAQUE e-mail (CAN-SPAM / ePrivacy — docs/01 §4) :
   sender_identity: "Galaxia — service de sites web pour restaurants"
   sender_postal_address: "Galaxia — 27 rue Dombasle, 75015 Paris, France"
+  sender_address: "contact@mail.galaxia-os.com"  # expéditeur réel (domaine vérifié Scaleway TEM)
   unsubscribe_base_url: "https://try.galaxia-os.com/u"  # /u/{token}
   daily_send_cap: 50            # réchauffe progressive (Anneau 1+)
+  # CANARI : si NON vide, TOUT envoi réel ne part QUE vers cette adresse (jamais le prospect).
+  # À mettre dans config/local.yaml (gitignored) pour tester sans risque. Vide = pas de canari.
+  redirect_all_to: ""
+  # Garde-fou n°3 : envoi vers de VRAIS prospects interdit tant que false. Le mode canari
+  # (redirect_all_to défini) ne dépend PAS de ce drapeau.
+  allow_production_send: false
 
 # --- Abonnement (Anneau 3 — paiement délégué, aucune carte stockée) --------
 billing:

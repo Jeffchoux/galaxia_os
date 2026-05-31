@@ -5,6 +5,8 @@
 *.key
 *.pem
 secrets/
+# Surcharges de config locales (ex. projects/restaurant/config/local.yaml — mode canari)
+local.yaml
 
 # Données runtime
 data/
