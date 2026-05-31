@@ -199,6 +199,10 @@ def _discover_from_overpass(conn, cfg: dict, cities: list[str] | None = None) ->
             rec = _parse_element(el)
             if not rec or rec["external_id"] in seen_ext:
                 continue
+            # Beaucoup de POI OSM n'ont pas de tag addr:city ; on retombe sur la ville
+            # interrogée (l'aire admin du run) — info publique fiable, pas une invention.
+            if not rec.get("city"):
+                rec["city"] = city
             seen_ext.add(rec["external_id"])
             bid = _db.upsert_business(conn, rec, cfg)
             if bid > 0:
