@@ -1,0 +1,63 @@
+[Unit]
+Description=Galaxia — Cowork orchestrator (plan -> approve -> exécute en bac à sable -> synthèse)
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/cowork
+# Daemon long : il sonde la file cowork_tasks et lance des conteneurs jetables.
+# Le réseau n'est requis QUE pour les appels au modèle (planner/synthèse) et le
+# mode egress opt-in d'une sous-tâche ; on attend network-online par prudence.
+Wants=network-online.target
+After=network-online.target docker.service
+# Sans Docker, l'orchestrateur ne peut pas lancer de bac à sable : on lie.
+Requires=docker.service
+
+[Service]
+# Daemon (boucle infinie claimNext/poll), pas oneshot — cf. tasks.py/worker.py.
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/agents/cowork
+
+# Le wizard écrit les clés ici (ANTHROPIC_API_KEY / GROQ_API_KEY / COWORK_API_KEY,
+# COWORK_PLANNER_MODEL, COWORK_EXEC_MODEL, COWORK_MAX_USD_PER_TASK, etc.).
+# Le préfixe `-` rend la source optionnelle : pas d'échec si le fichier n'existe
+# pas encore (l'orchestrateur fail-closera proprement sur "clé manquante").
+EnvironmentFile=-/opt/galaxia/config/.env
+# Chemin de la base partagée avec le cockpit (même fichier que le cockpit écrit).
+Environment=COWORK_DB_PATH=/home/galaxia/galaxia-project/apps/cockpit/data/cockpit.db
+# Répertoire de travail des tâches (run dirs + workspaces des sous-tâches montés
+# dans les conteneurs). Doit rester inscriptible (cf. ReadWritePaths plus bas).
+Environment=COWORK_RUN_DIR=/home/galaxia/.local/share/galaxia/cowork
+
+ExecStart=/usr/bin/node /home/galaxia/galaxia-project/agents/cowork/orchestrator.mjs
+
+# Daemon : on redémarre s'il meurt, mais pas en boucle folle.
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# --- Garde-fous (gabarit galaxia-coder.service, assoupli pour atteindre Docker) ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# /tmp privé et isolé pour le process node de l'orchestrateur lui-même.
+# (Les bacs à sable ont leur PROPRE tmpfs /tmp, géré par docker run.)
+PrivateTmp=true
+ProtectHome=read-only
+
+# ProtectSystem=strict + ProtectHome=read-only montent /home en lecture seule.
+# On ré-ouvre en écriture UNIQUEMENT :
+#  - le run dir Cowork (run dirs + workspaces montés rw dans les conteneurs) ;
+#  - le répertoire data du cockpit (SQLite cowork_tasks/cowork_subtasks partagé).
+ReadWritePaths=/home/galaxia/.local/share/galaxia/cowork
+ReadWritePaths=/home/galaxia/galaxia-project/apps/cockpit/data
+
+# Accès au socket Docker : l'orchestrateur lance/kill les conteneurs jetables via
+# le wrapper run-subtask.sh (docker run / docker kill). ProtectSystem=strict ne
+# masque pas /run, mais on déclare explicitement le socket pour la lisibilité ;
+# l'utilisateur galaxia est dans le groupe docker (cf. CLAUDE.md infra).
+# (Pas de DevicePolicy stricte ici : Docker délègue au démon, pas à des /dev.)
+
+[Install]
+WantedBy=multi-user.target

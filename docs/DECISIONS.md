@@ -269,3 +269,66 @@ Pour Jeff en dogfooding (10-30 min/jour) : entre **1 et 10 €/mois**.
 - Cascade Galaxia complète (Claude + memory.md + tools MCP + Kyutai TTS + Whisper STT) reste le mode par défaut.
 - D7 (Whisper CPU) reste valable, swap GPU futur identique.
 - D6 reste l'orientation stratégique long terme (voix souveraine), D8 n'est qu'un complément optionnel.
+
+---
+
+## 2026-05-31 — Cowork autonome : on construit (renversement du « Cowork différé » du 2026-05-30)
+
+**Posée le :** 2026-05-31 (demande explicite de Jeff)
+**Tranchée le :** 2026-05-31
+
+**Renversement assumé.** Le 2026-05-30, le mode « Cowork » du spec UI avait été
+**différé** (« pas de backend de tâches à brancher pour l'instant — choix
+Jeff », cf. [`STATUS.md`](STATUS.md) § « Thème clair terracotta »). Jeff a
+tranché l'inverse ce jour : **on construit Cowork maintenant**, en version
+**autonome** (objectif → plan → gate → exécution sandboxée → livrable).
+
+**Trois choix validés avec Jeff :**
+
+1. **L'orchestrateur est à la fois l'équipe de construction (« build-crew ») et
+   une capacité produit permanente.** Le même moteur qui aide à bâtir Galaxia
+   (décomposer un objectif en sous-tâches exécutées en parallèle) devient une
+   fonctionnalité livrée du cockpit pour le manager PME. Pas un échafaudage
+   jetable : un composant pérenne, packagé Hub & Spoke pour les filles.
+2. **Flotte d'agents dès maintenant.** On ne se limite pas à un agent
+   séquentiel : les sous-tâches indépendantes du DAG s'exécutent **en
+   parallèle** (jusqu'à `COWORK_MAX_CONCURRENCY`), chacune dans son propre
+   processus/conteneur.
+3. **Sandbox Docker par tâche.** Chaque sous-tâche tourne dans un **conteneur
+   Docker jetable et isolé** (`--rm --read-only --network=none --cap-drop=ALL
+   --user 1000:1000`, seul `/workspace` monté), plutôt qu'un sous-processus à
+   même l'hôte. Le rayon d'action d'une sous-tâche se limite à un espace de
+   travail éphémère ; le kill-switch fait `docker kill`. Choix conforme à la
+   posture souveraine et conservatrice de Galaxia.
+
+**Garde-fou central conservé : le gate d'approbation humaine.** Les sous-tâches
+`safe` et `mutating` avancent seules (la boîte est jetable) ; les
+`consequential` (irréversibles, effet de bord réseau, envoi de message, PR,
+déploiement, dépense) **forcent** une approbation humaine explicite et sont
+`skipped` si jamais approuvées. On ne fait jamais une action à conséquence sans
+un « oui » du manager.
+
+**Politique modèle respectée :** planner + exécution en **gratuit/peu cher par
+défaut** (`COWORK_PLANNER_MODEL` = `claude-sonnet-4-6`, `COWORK_EXEC_MODEL`
+sonnet/groq), Opus seulement sur escalade explicite. Plafond de coût par tâche
+`COWORK_MAX_USD_PER_TASK` (défaut 1,00 $), mime `GALAXIA_CODER_MAX_USD_PER_RUN`.
+
+**Conséquences dans le code** (branche `feat/cockpit-cowork-autonomous`,
+worktree `/home/galaxia/cowork-build`) :
+
+- DB : tables `cowork_tasks` + `cowork_subtasks` + helpers dans
+  `apps/cockpit/src/lib/server/db.ts`.
+- API : routes `apps/cockpit/src/routes/api/cowork/…` (CRUD + SSE + approve +
+  kill), scopées `locals.user`.
+- Orchestrateur : `agents/cowork/orchestrator.mjs` (démon
+  `galaxia-cowork.service`), schéma Zod du plan.
+- Sandbox : `agents/cowork/sandbox/run-subtask.sh` + image
+  `galaxia/cowork-sandbox`.
+- UI : panneau Cowork dans `apps/cockpit/src/routes/+page.svelte` (bouton
+  « 🤝 Cowork » réactivé).
+- Doc : `docs/COWORK.md` (architecture complète).
+
+**État :** code écrit sur la branche, **pas encore mergé, pas déployé,
+vérification de bout en bout en attente** (intégration & build faits par
+l'humain). Voir [`STATUS.md`](STATUS.md) § « Cowork autonome » et
+[`COWORK.md`](COWORK.md).

@@ -15,7 +15,7 @@ Pour battre Claude Code, il faut d'abord savoir précisément ce qu'il fait bien
 | Capacité Claude Code               | État Galaxia (2026-05)                                 | Verdict             |
 |------------------------------------|--------------------------------------------------------|---------------------|
 | Chat texte avec Claude             | ❌ Pas d'interface chat dans Galaxia                   | À construire        |
-| Cowork (« assist me as I work »)   | ❌ Pas de session live coworking                       | À construire        |
+| Cowork (objectif → plan → exécution autonome) | 🚧 En construction (2026-05-31) — orchestrateur + sandbox Docker, branche `feat/cockpit-cowork-autonomous`, pas encore déployé | **Différenciateur** |
 | Édition de code (Read/Write/Edit)  | ✅ Existe (coder agent via SDK)                        | Sous-utilisé        |
 | Multi-fichier, diff review         | ⚠️ Coder agent fait des PRs, pas de review live        | À étendre           |
 | Voix (input/output)                | ❌ Aucune                                              | **Différenciateur** |
@@ -111,13 +111,27 @@ Cible : **une seule page web, ouverte en plein écran sur l'ordinateur du manage
 
 ### 3.4. Mode « cowork »
 
-Quand le manager travaille sur un document ouvert dans une autre app (Word, navigateur, Figma), Galaxia peut :
+Le manager donne un **objectif** (pas une commande pas-à-pas), et Galaxia
+s'en charge **toute seule**, de bout en bout. L'architecture (en construction
+depuis le 2026-05-31, détail dans [`COWORK.md`](COWORK.md)) :
 
-- l'**écouter en arrière-plan** (opt-in explicite) et intervenir si on lui parle ;
-- **observer ce qui se passe à l'écran** via la screenshare API (avec consentement par session), et commenter / suggérer ;
-- **éditer à 4 mains** : le manager dicte, Galaxia rédige dans le document ouvert.
+- **PLAN** : un orchestrateur décompose l'objectif en un graphe (DAG) de
+  sous-tâches ordonnées, chacune classée par niveau de risque.
+- **GATE d'approbation humaine** : les étapes à **conséquence** (irréversibles,
+  envoi de message, dépense, déploiement) **s'arrêtent** et attendent un « oui »
+  explicite du manager ; les étapes sûres et contenues avancent seules.
+- **EXÉCUTION sandboxée** : chaque sous-tâche tourne dans un **conteneur Docker
+  jetable et isolé** (sans réseau par défaut), de sorte que le rayon d'action se
+  limite à un espace de travail éphémère.
+- **LIVRABLE** : Galaxia agrège les sorties en un résultat unique, suivi en
+  direct dans le cockpit (streaming SSE, comme une conversation).
 
-Cette dernière capacité est le seul vrai concurrent de « Claude Code cowork ». La différence : on ne lui parle pas à un terminal, on lui parle dans son cockpit.
+C'est le vrai concurrent de « Claude Code cowork », mais pensé pour le manager
+non-dev : on ne pilote pas un terminal, on confie un objectif et on garde la
+main sur le seul moment qui compte — l'approbation des actions à conséquence.
+Cap conservé pour plus tard : un cowork **multimodal en direct** (écoute en
+arrière-plan, observation d'écran opt-in via screenshare, édition « à 4 mains »
+dictée par la voix), à empiler sur cette base autonome.
 
 ---
 
