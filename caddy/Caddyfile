@@ -2,11 +2,25 @@
 	email jeffchoux@hotmail.com
 }
 
+# En-têtes de sécurité HTTP communs (audit DG 2026-05-31, SEC-CKP medium).
+# Conservateur volontairement : pas de CSP ici (à régler finement par app pour
+# ne pas casser SvelteKit/inline) — voir docs/AUDIT-DG-2026-05-31.md.
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
 # Application principale — cockpit SvelteKit (apps/cockpit).
 # Service systemd `galaxia-cockpit.service` écoute sur 127.0.0.1:3001.
 # Caddy fait le TLS + envoie X-Forwarded-* (utilisé par adapter-node pour
 # reconstruire l'Origin attendu par le CSRF check de SvelteKit).
 app.galaxia-os.com {
+	import security_headers
 	encode gzip zstd
 	reverse_proxy 127.0.0.1:3001 {
 		# SSE: pas de buffering pour le streaming Claude live.
@@ -52,8 +66,17 @@ docs.galaxia-os.com {
 # SSH local 127.0.0.1:18789 (sinon Caddy renvoie 502).
 # Auth : token NemoClaw dans le fragment URL (#token=...) géré par le dashboard JS.
 # Récupérer l'URL avec token via : sudo -u galaxia nemoclaw galaxia-main dashboard-url -q
+# Durcissement 2026-05-31 (audit DG, SEC-CKP-03) : porte basic_auth en amont, en
+# défense en profondeur — le fragment #token= n'est jamais transmis au serveur, donc
+# on bloque tout accès non authentifié AVANT d'atteindre le dashboard. Identifiant : jeff.
+# Ce bloc est la source de vérité ; il doit rester synchro avec /etc/caddy/Caddyfile.
+# Rollback : retirer le bloc basic_auth + reload caddy.
 nemoclaw.galaxia-os.com {
+	import security_headers
 	encode gzip zstd
+	basic_auth {
+		jeff $2a$14$xHcPHwZLnjI34whbc1GtC.H2AKd0hF18IRgUzErObDMtsPAYakq0y
+	}
 	reverse_proxy 127.0.0.1:18789 {
 		# WebSocket-friendly : pas de buffering si le dashboard en utilise.
 		flush_interval -1

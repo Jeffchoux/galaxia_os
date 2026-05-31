@@ -1,7 +1,11 @@
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b';
+// Défaut bumpé llama3.1:8b -> qwen3:8b (audit DG 2026-05-31, veille état-de-l'art :
+// meilleur code/tool-use à empreinte RAM ~égale, Apache 2.0). Modèle pull sur la
+// mère le 2026-05-31. Surchargeable par OLLAMA_MODEL. Dégradation gracieuse : si le
+// modèle manque sur une fille, Ollama renvoie une erreur et l'item garde son fallback.
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen3:8b';
 
-// CPU inference (~2 tok/s on llama3.1:8b). 40 tokens ≈ 20 s. We cap with
+// CPU inference (~2 tok/s). 40 tokens ≈ 20 s. We cap with
 // `stop` sequences too — the model often keeps rambling past the period.
 export async function synthesizeItem(item, { fetchImpl = fetch, timeoutMs = 120_000, numPredict = 50 } = {}) {
   const prompt = buildPrompt(item);
