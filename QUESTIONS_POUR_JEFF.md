@@ -286,10 +286,11 @@ Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + on
 ## 15. Projet « restaurant » — bloquants AVANT tout envoi d'e-mail réel
 
 **Posée le :** 2026-05-28
-**Statut :** partiellement tranchée — **15.1 réglée le 2026-05-31** (domaine + prestataire,
-voir [`docs/DECISIONS.md`](docs/DECISIONS.md)) ; **15.2 / 15.3 / 15.4 toujours ouvertes**.
-N'empêche rien pour l'instant (le système est livré et tourne en **dry-run total** : aucun
-e-mail envoyé, aucun site publié, aucun paiement).
+**Statut :** partiellement tranchée — **15.1 (domaine + prestataire) et 15.4 (adresse
+postale) réglées le 2026-05-31** (voir [`docs/DECISIONS.md`](docs/DECISIONS.md)) ; **15.2
+tourne sur le défaut documenté, 15.3 (Stripe) reste ouverte**. N'empêche rien pour l'instant
+(le système est livré et tourne en **dry-run total** : aucun e-mail envoyé, aucun site
+publié, aucun paiement ; `send_enabled` reste `false` jusqu'à un GO explicite d'envoi réel).
 
 J'ai construit de bout en bout le système autonome « restaurant » (génère des sites pour
 restos à faible présence web, les héberge, les contacte, les convertit à 10 €/mois). Détail
@@ -314,9 +315,13 @@ ePrivacy FR. OK pour cibler **la France d'abord** ? (les US / CAN-SPAM, plus tar
 jamais la carte) + mentions légales / CGV / politique de confidentialité de l'offre. Tu
 ouvres le compte Stripe, ou je prépare tout et tu valides ?
 
-**15.4 — Adresse postale physique.** Obligatoire dans chaque e-mail commercial (loi). Quelle
-adresse afficher comme expéditeur ?
+**15.4 — Adresse postale physique. ✅ TRANCHÉE le 2026-05-31.** Adresse expéditeur fournie par
+Jeff : **27 rue Dombasle, 75015 Paris, France**. Posée dans
+`projects/restaurant/config/default.yaml` → `email.sender_postal_address` (alimente le
+placeholder `{{SENDER_POSTAL_ADDRESS}}` du pied d'e-mail, exigé par `compliance`/`qa`).
 
 **Impact si pas tranché :** **aucun blocage du travail** — je reste en dry-run et j'avance
-sur tout l'interne. Mais aucun e-mail réel ne partira tant que 15.2 et 15.4 ne sont
-pas réglés (c'est le garde-fou voulu), et aucune facturation tant que 15.3 ne l'est pas.
+sur tout l'interne. Les conditions légales d'un envoi réel sont désormais réunies (domaine
+authentifié, adresse postale, base légale par défaut, opt-out), mais **`send_enabled` reste
+`false` : aucun e-mail réel ne partira sans un GO explicite de Jeff** (+ branchement
+`email_agent`↔Scaleway et warm-up). Aucune facturation tant que 15.3 (Stripe) n'est pas réglé.

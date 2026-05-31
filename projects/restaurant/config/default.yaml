@@ -80,7 +80,7 @@ email:
   followup_delay_days: 4
   # Obligatoire dans CHAQUE e-mail (CAN-SPAM / ePrivacy — docs/01 §4) :
   sender_identity: "Galaxia — service de sites web pour restaurants"
-  sender_postal_address: "À DÉFINIR — adresse postale physique requise avant tout envoi réel"
+  sender_postal_address: "Galaxia — 27 rue Dombasle, 75015 Paris, France"
   unsubscribe_base_url: "https://try.galaxia-os.com/u"  # /u/{token}
   daily_send_cap: 50            # réchauffe progressive (Anneau 1+)
 
