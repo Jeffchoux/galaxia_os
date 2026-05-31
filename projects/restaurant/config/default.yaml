@@ -92,8 +92,12 @@ billing:
   price_usd: 10
   interval: month
   # Prix d'abonnement créé par Jeff dans Stripe (2026-05-31). Le price_id n'est
-  # pas un secret (utilisé côté Checkout). La clé API secrète Stripe vit dans
-  # /opt/galaxia/config/.env (STRIPE_SECRET_KEY), jamais committée.
+  # pas un secret (utilisé côté Checkout). Les SECRETS Stripe vivent dans
+  # /opt/galaxia/config/.env, jamais committés :
+  #   STRIPE_SECRET_KEY      (sk_test_… en mode test, sk_live_… en réel)
+  #   STRIPE_WEBHOOK_SECRET  (whsec_… — vérification de signature des webhooks)
+  # Implémentation : pipeline/billing.py + pipeline/billing_webhook.py. Inerte
+  # tant que ring < 3 ET enabled=false (garde Anneau 3).
   stripe_price_id: "price_1Td9hjGkdqVQ5YQ841LHCUni"
 
 # --- Rétention / conformité RGPD -------------------------------------------

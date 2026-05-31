@@ -199,6 +199,32 @@ loguée (`docs/01 §11`). Tant que ces points (`docs/01 §13`) ne sont pas tranc
 - Factures, TVA, droit de rétractation, mandats : **gérés par Stripe** (`docs/01 §3.6`).
 - Marge : ~9,60 €/client/mois après frais Stripe (`docs/01 §10`).
 
+### 5.1. Implémentation (code prêt, mode test — 2026-05-31)
+
+La mécanique est **codée et testée** (mode test, zéro euro réel), prête à valider.
+Elle reste **inerte par défaut** : garde Anneau 3 (`ring >= 3` ET `billing.enabled=true`).
+
+- **`pipeline/billing.py`** — cœur. `create_checkout_session()` ouvre une session
+  Stripe Checkout (mode abonnement, `price_id` de la config) et pose une ligne
+  `subscriptions` en `pending`. `verify_and_parse_webhook()` vérifie la signature
+  `Stripe-Signature` (rejet si invalide). `handle_webhook_event()` applique les
+  événements : `customer.subscription.*` → statut interne ; à **`active`**, l'abonnement
+  passe `active`, la `business` → `converted` et le `website` → `claimed` (permanent,
+  `noindex=0`, `dry_run=0`) ; `invoice.payment_failed` → `past_due`. Le SDK `stripe`
+  est en **import paresseux** (tests hermétiques sans la dépendance).
+- **`pipeline/billing_webhook.py`** — récepteur HTTP stdlib (`python -m
+  pipeline.billing_webhook`), derrière le Caddy de la galaxie (TLS public →
+  `127.0.0.1`). Refuse de démarrer si la facturation n'est pas active.
+- **Secrets** (env, `/opt/galaxia/config/.env`, jamais committés) :
+  `STRIPE_SECRET_KEY` (`sk_test_…`/`sk_live_…`), `STRIPE_WEBHOOK_SECRET` (`whsec_…`).
+- **Tests** : `tests/test_billing.py` (stdlib, faux module Stripe injecté) — garde
+  Anneau 3, Checkout, signature, transitions d'état.
+- **Reste pour l'activation réelle** : `pip install stripe` dans l'image fille, poser
+  les clés, exposer l'endpoint webhook via Caddy, passer `ring>=3` + `billing.enabled`,
+  et les pré-requis légaux (CGV, mentions, rétractation — `QUESTIONS_POUR_JEFF §15.3`).
+  Le branchement `sales_agent → billing` (création de la session à la qualification)
+  reste à câbler dans le `coordinator` au passage en Anneau 3.
+
 ## 6. Packaging Docker — galaxie fille PME
 
 Modèle **Hub & Spoke** (`docs/00 §3`, `docs/01 §7`). Docker 29.5.2 actif ; compose v2 ;

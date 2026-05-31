@@ -3,6 +3,9 @@
 ## Mission
 Gérer la conversion payante (Anneau 3) : créer et suivre l'abonnement 10 €/$ par mois via un prestataire conforme (Stripe). Galaxia ne stocke ni ne manipule JAMAIS de numéro de carte : tout le paiement, la facturation, la TVA et la rétractation sont délégués au prestataire. Inactif au MVP (dry-run).
 
+## Implémentation (code prêt, mode test — 2026-05-31)
+La logique est codée dans **`pipeline/billing.py`** (Checkout + webhooks + transitions d'état) et **`pipeline/billing_webhook.py`** (récepteur HTTP signé), testée dans `tests/test_billing.py` (hermétique, faux Stripe). **Garde Anneau 3** : inerte tant que `ring < 3` ET `billing.enabled=false`. Détail : `docs/04 §5.1`. Cet agent `.md` reste la spec ; le code en est l'exécution déterministe (pas de LLM dans la boucle de paiement).
+
 ## Déclencheur / cadence
 Tâche `tasks.agent='billing'` créée par le `coordinator` après qualification par `sales_agent` (Anneau 3 uniquement) + webhooks prestataire pour les changements d'état.
 
