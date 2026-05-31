@@ -392,3 +392,25 @@ réunies (15.1 domaine authentifié + 15.4 adresse + 15.2 base légale par défa
 opt-out). **`send_enabled` reste néanmoins `false`** : l'envoi réel exige un GO
 explicite de Jeff, le branchement `email_agent`↔Scaleway et un warm-up. 15.3
 (Stripe) reste requis pour la facturation.
+
+---
+
+## 2026-05-31 — Q15.3 : paiement Stripe (en cours)
+
+**Posée le :** 2026-05-28
+**Avancée le :** 2026-05-31
+
+**Décision/avancée** : Jeff a créé l'abonnement **10 €/mois** dans Stripe. Le
+`price_id` retenu = **`price_1Td9hjGkdqVQ5YQ841LHCUni`**.
+
+**Conséquence dans le code** :
+- `projects/restaurant/config/default.yaml` → `billing.stripe_price_id`
+  (le `price_id` n'est pas un secret — utilisé côté Checkout).
+
+**Reste à faire** :
+- Fournir la **clé API secrète Stripe** (`sk_test_…` d'abord) → ira dans
+  `/opt/galaxia/config/.env` (`STRIPE_SECRET_KEY`, jamais committée, à rotater).
+  Sans elle, le flux Checkout/abonnement ne peut pas être câblé.
+- Avant toute facturation *live* : CGV / mentions légales / politique de
+  confidentialité de l'offre, et bascule en clés `live`.
+- `billing.enabled` reste **`false`** jusqu'à un GO explicite.

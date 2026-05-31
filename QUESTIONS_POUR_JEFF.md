@@ -288,7 +288,8 @@ Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + on
 **Posée le :** 2026-05-28
 **Statut :** partiellement tranchée — **15.1 (domaine + prestataire) et 15.4 (adresse
 postale) réglées le 2026-05-31** (voir [`docs/DECISIONS.md`](docs/DECISIONS.md)) ; **15.2
-tourne sur le défaut documenté, 15.3 (Stripe) reste ouverte**. N'empêche rien pour l'instant
+tourne sur le défaut documenté ; 15.3 (Stripe) : prix d'abonnement créé, reste la clé API
+secrète à fournir**. N'empêche rien pour l'instant
 (le système est livré et tourne en **dry-run total** : aucun e-mail envoyé, aucun site
 publié, aucun paiement ; `send_enabled` reste `false` jusqu'à un GO explicite d'envoi réel).
 
@@ -311,9 +312,13 @@ l'envoi reste `send_enabled:false` tant que 15.2 et 15.4 ne sont pas réglées.
 (`contact@`, `info@`) de restaurants, base « intérêt légitime », opt-out 1 clic — conforme
 ePrivacy FR. OK pour cibler **la France d'abord** ? (les US / CAN-SPAM, plus tard.)
 
-**15.3 — Paiement.** Abonnement 10 €/mois ⇒ il faut un **compte Stripe** (Galaxia ne touche
-jamais la carte) + mentions légales / CGV / politique de confidentialité de l'offre. Tu
-ouvres le compte Stripe, ou je prépare tout et tu valides ?
+**15.3 — Paiement. 🟡 EN COURS (2026-05-31).** Jeff a créé l'abonnement Stripe 10 €/mois →
+`price_id` = `price_1Td9hjGkdqVQ5YQ841LHCUni`, posé dans
+`projects/restaurant/config/default.yaml` (`billing.stripe_price_id`). **Reste à fournir** :
+la **clé API secrète Stripe** (`sk_test_…` pour démarrer) pour câbler le flux Checkout/abonnement
+côté code → ira dans `/opt/galaxia/config/.env` (`STRIPE_SECRET_KEY`). À faire aussi avant
+facturation live : mentions légales / CGV / politique de confidentialité de l'offre.
+`billing.enabled` reste `false` jusqu'à un GO explicite.
 
 **15.4 — Adresse postale physique. ✅ TRANCHÉE le 2026-05-31.** Adresse expéditeur fournie par
 Jeff : **27 rue Dombasle, 75015 Paris, France**. Posée dans
