@@ -118,6 +118,17 @@ async function ensureConnections(): Promise<ConnectedServer[]> {
 	return _connecting;
 }
 
+/**
+ * Invalide le cache de connexions MCP. Appelé automatiquement par
+ * callMcpTool() si un appel lève une erreur réseau — le prochain appel
+ * déclenchera une reconnexion à froid plutôt que de réutiliser un
+ * process enfant mort (problème signalé dans "MCP is dead?", Quandri 2026).
+ */
+function invalidateConnections(): void {
+	_connections = null;
+	_connecting = null;
+}
+
 export async function listMcpTools(): Promise<GalaxiaTool[]> {
 	const conns = await ensureConnections();
 	const tools: GalaxiaTool[] = [];
@@ -157,6 +168,10 @@ export async function callMcpTool(
 			: JSON.stringify(res.content);
 		return { result: text, is_error: !!res.isError };
 	} catch (e) {
+		// Le process enfant MCP est probablement mort. On invalide le cache pour
+		// que le prochain appel tente une reconnexion à froid.
+		invalidateConnections();
+		console.error(`[mcp] callTool(${name}) échoué, cache invalidé :`, e);
 		return {
 			result: e instanceof Error ? e.message : String(e),
 			is_error: true
