@@ -58,6 +58,11 @@ def run(reset: bool = False) -> dict:
             b = dict(row)
             # rappatrie la cuisine éventuelle depuis la seed d'audit (fixtures)
             c = content.build_content(b, cfg)
+            em = c.get("enrichment", {})
+            # Trace réelle du coût (0 € en local) dans agent_runs (docs/06).
+            db.record_run(conn, "content", model=em.get("model", "deterministic"),
+                          ok=True, cost_usd=em.get("cost_usd", 0.0),
+                          duration_ms=em.get("duration_ms", 0))
             site = build.build_site(conn, cfg, b, c)
             summary["sites_built"] += 1
             res = email_gen.generate_email(conn, cfg, b, site, lang=langs[0])
@@ -69,7 +74,7 @@ def run(reset: bool = False) -> dict:
                 "business": b["name"], "slug": site["slug"],
                 "email_status": res["status"], "email_path": res.get("path"),
             })
-        db.record_run(conn, "content+build+email", model="ollama:llama3.1:8b (simulé)", ok=True)
+        db.record_run(conn, "build+email", model="-", ok=True)
     finally:
         conn.close()
     return summary
