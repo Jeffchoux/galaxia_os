@@ -20,7 +20,19 @@ export interface MailProvider {
 class ConsoleProvider implements MailProvider {
 	readonly name = 'console';
 	async sendMagicLink(to: string, link: string): Promise<void> {
-		console.log(`[mail/console] magic link pour ${to} : ${link}`);
+		// Durcissement audit DG 2026-05-31 (SEC-CKP-01) : NE PAS écrire le lien
+		// magique (token de connexion, TTL 15 min) en clair dans journald — quiconque
+		// lit les logs prendrait la main sur le compte. On masque par défaut ; le lien
+		// complet n'est affiché qu'en opt-in explicite local (MAIL_CONSOLE_VERBOSE=1).
+		// La vraie correction prod = MAIL_PROVIDER=brevo + BREVO_API_KEY (voir env.ts).
+		if (process.env.MAIL_CONSOLE_VERBOSE === '1') {
+			console.log(`[mail/console] magic link pour ${to} : ${link}`);
+		} else {
+			console.log(
+				`[mail/console] magic link généré pour ${to} (token masqué ; ` +
+					`MAIL_CONSOLE_VERBOSE=1 pour l'afficher en dev, ou MAIL_PROVIDER=brevo en prod)`
+			);
+		}
 	}
 }
 

@@ -7,8 +7,8 @@ mots-clés Galaxia et synthétise via Ollama local en un rapport markdown.
 ## Prérequis
 
 - Node.js ≥ 22 (utilise `fetch` natif, `node:test`, ESM)
-- Ollama local sur `http://127.0.0.1:11434` avec `llama3.1:8b` (déjà installé
-  sur OpenJeff — voir `docs/STATUS.md`)
+- Ollama local sur `http://127.0.0.1:11434` avec `qwen3:8b` (pull sur OpenJeff
+  le 2026-05-31 ; bascule depuis `llama3.1:8b` — voir `docs/STATUS.md`)
 - Accès sortant HTTPS vers `hn.algolia.com`, `github.com`, `export.arxiv.org`
 
 Aucune dépendance npm tierce. Le `package.json` est volontairement vide côté
@@ -27,7 +27,7 @@ Variables d'environnement :
 | Variable        | Défaut                                  | Rôle                          |
 |-----------------|-----------------------------------------|-------------------------------|
 | `OLLAMA_URL`    | `http://127.0.0.1:11434/api/generate`   | Endpoint Ollama               |
-| `OLLAMA_MODEL`  | `llama3.1:8b`                           | Modèle utilisé pour les TLDR  |
+| `OLLAMA_MODEL`  | `qwen3:8b`                              | Modèle utilisé pour les TLDR  |
 
 Le script est **idempotent** sur la journée : relancer le même jour écrase le
 rapport du jour. Si une source est down, l'erreur est loggée dans le rapport au

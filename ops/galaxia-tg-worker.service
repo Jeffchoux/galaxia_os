@@ -8,15 +8,33 @@ Type=simple
 User=galaxia
 Group=galaxia
 WorkingDirectory=/home/galaxia/galaxia-project
-# Clés LLM + GH (mêmes que l'agent coder) PUIS token du bot pour répondre sur Telegram.
+# Clés LLM + token du bot pour répondre sur Telegram.
 EnvironmentFile=/opt/galaxia/config/.env
 EnvironmentFile=/home/galaxia/galaxia-project/agents/telegram/.env
+# Durcissement audit DG 2026-05-31 (SEC-AGT-08) : le worker exécute Claude en
+# bypassPermissions mais n'a AUCUN besoin de pousser du code → on retire les
+# jetons GitHub de son environnement (ils restent pour l'agent coder via le même
+# EnvironmentFile, mais sont effacés ici APRÈS chargement).
+UnsetEnvironment=GH_TOKEN GITHUB_TOKEN
 ExecStart=/home/galaxia/.claude/galaxia/venv/bin/python /home/galaxia/galaxia-project/agents/telegram/worker.py
 Restart=on-failure
 RestartSec=5
 Nice=10
 StandardOutput=journal
 StandardError=journal
+
+# Durcissement audit DG 2026-05-31 (risque #2 — worker nu qui exécute Claude en
+# bypassPermissions). NoNewPrivileges bloque l'escalade via sudo/setuid depuis ce
+# process (mitige l'escalade root tant que sudoers/groupe docker ne sont pas réglés).
+# Aligné sur galaxia-bot.service. ReadWritePaths : le repo (Claude écrit dedans),
+# l'état CLI Claude (~/.claude), et la base cockpit (file de tâches tg_tasks).
+# ⚠️ Déploiement à tester (un /do simple) car Claude headless n'a jamais tourné sous
+# ces contraintes — élargir ReadWritePaths si un EACCES apparaît au démarrage.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/galaxia/galaxia-project /home/galaxia/.claude
 
 [Install]
 WantedBy=multi-user.target
