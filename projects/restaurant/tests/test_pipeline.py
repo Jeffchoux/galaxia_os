@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from pipeline import config, content, db, discovery, email_gen, run_dry  # noqa: E402
+from pipeline import audit, config, content, db, discovery, email_gen, run_dry  # noqa: E402
 
 
 class DryRunPipeline(unittest.TestCase):
@@ -342,6 +342,88 @@ class CanarySendGuard(unittest.TestCase):
             "prospect@resto.fr", "Sujet")
         self.assertIsNone(blocked)
         self.assertEqual(to, "jeff@example.com")
+
+
+class AuditLiveSSRF(unittest.TestCase):
+    """Audit HTTP réel (_audit_live) — garde-fou SSRF + scoring, sans réseau (DNS/fetch mockés)."""
+
+    CFG = {"audit": {"timeout_ms": 2000, "max_bytes": 500000, "respect_robots": False,
+                     "block_private_ips": True, "qualify_below_score": 60},
+           "discovery": {"user_agent": "GalaxiaBot/1.0"}}
+
+    @staticmethod
+    def _addr(ip, port=80):
+        return [(2, 1, 6, "", (ip, port))]
+
+    def test_no_website_is_perfect_target(self):
+        a = audit._audit_live(None, self.CFG)
+        self.assertEqual(a["has_website"], 0)
+        self.assertEqual(a["score"], 0)
+
+    def test_ssrf_private_ip_refused(self):
+        orig = audit.socket.getaddrinfo
+        audit.socket.getaddrinfo = lambda *a, **k: self._addr("127.0.0.1")
+        try:
+            a = audit._audit_live("http://evil.example/", self.CFG)
+        finally:
+            audit.socket.getaddrinfo = orig
+        self.assertEqual(a["score"], 100)              # ne qualifie pas → pas contacté
+        self.assertIn("non public", a["weakness_summary"])
+
+    def test_ssrf_cloud_metadata_refused(self):
+        orig = audit.socket.getaddrinfo
+        audit.socket.getaddrinfo = lambda *a, **k: self._addr("169.254.169.254")
+        try:
+            a = audit._audit_live("http://169.254.169.254/latest/meta-data/", self.CFG)
+        finally:
+            audit.socket.getaddrinfo = orig
+        self.assertEqual(a["score"], 100)
+        self.assertIn("non public", a["weakness_summary"])
+
+    def test_weak_site_qualifies(self):
+        ga, fe = audit.socket.getaddrinfo, audit._fetch
+        audit.socket.getaddrinfo = lambda *a, **k: self._addr("93.184.216.34")
+        audit._fetch = lambda url, cfg, **k: {
+            "final_url": url, "status": 200, "https": False,
+            "body": b"<html><body>Resto</body></html>"}
+        try:
+            a = audit._audit_live("http://resto-pauvre.fr", self.CFG)
+        finally:
+            audit.socket.getaddrinfo, audit._fetch = ga, fe
+        self.assertEqual(a["reachable"], 1)
+        self.assertLess(a["score"], 60)               # cible
+        self.assertIn("pas de HTTPS", a["weakness_summary"])
+
+    def test_good_site_not_qualified(self):
+        ga, fe = audit.socket.getaddrinfo, audit._fetch
+        big = ("<html><head><title>Resto</title>"
+               "<meta name=\"viewport\" content=\"width=device-width\"></head><body>"
+               + "Bienvenue dans notre restaurant. " * 300 + "</body></html>").encode()
+        audit.socket.getaddrinfo = lambda *a, **k: self._addr("93.184.216.34", 443)
+        audit._fetch = lambda url, cfg, **k: {"final_url": url, "status": 200,
+                                              "https": True, "body": big}
+        try:
+            a = audit._audit_live("https://resto-pro.fr", self.CFG)
+        finally:
+            audit.socket.getaddrinfo, audit._fetch = ga, fe
+        self.assertGreaterEqual(a["score"], 60)        # déjà bon → pas contacté
+        self.assertEqual(a["is_https"], 1)
+        self.assertEqual(a["mobile_friendly"], 1)
+
+    def test_unreachable_site_is_target(self):
+        ga, fe = audit.socket.getaddrinfo, audit._fetch
+
+        def _boom(*a, **k):
+            raise OSError("connection refused")
+
+        audit.socket.getaddrinfo = lambda *a, **k: self._addr("93.184.216.34", 443)
+        audit._fetch = _boom
+        try:
+            a = audit._audit_live("https://resto-mort.fr", self.CFG)
+        finally:
+            audit.socket.getaddrinfo, audit._fetch = ga, fe
+        self.assertEqual(a["reachable"], 0)
+        self.assertLess(a["score"], 60)
 
 
 if __name__ == "__main__":
