@@ -272,6 +272,22 @@ class OverpassDiscovery(unittest.TestCase):
             discovery._overpass_fetch = orig
             conn.close()
 
+    def test_missing_addr_city_falls_back_to_queried_city(self):
+        # le way/2 du SAMPLE n'a pas de addr:city -> doit retomber sur la ville interrogée
+        cfg = self._temp_cfg()
+        cfg["discovery"].update(cities=["Amboise"], max_per_run=20, request_delay_ms=0)
+        orig = discovery._overpass_fetch
+        discovery._overpass_fetch = lambda q, c: {"elements": [self.SAMPLE["elements"][1]]}
+        conn = db.connect(cfg)
+        try:
+            ids = discovery._discover_from_overpass(conn, cfg)
+            city = conn.execute("SELECT city FROM businesses WHERE id=?",
+                                (ids[0],)).fetchone()["city"]
+            self.assertEqual(city, "Amboise")
+        finally:
+            discovery._overpass_fetch = orig
+            conn.close()
+
     def test_query_sanitizes_quotes_in_city(self):
         # un nom de ville avec guillemets ne doit pas casser/échapper la requête QL
         q = discovery._overpass_query('Saint-"X"', "restaurant")
