@@ -44,6 +44,21 @@ jobs:
         working-directory: agents/veille
         run: node --test test/*.test.js
 
+  restaurant-tests:
+    name: projects/restaurant pipeline tests (stdlib, hermetic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run dry-run + runtime + discovery tests
+        # Stdlib only (unittest/sqlite3/urllib) — aucune dépendance à installer.
+        # Suite hermétique : appels réseau (Ollama, Overpass) monkeypatchés, base
+        # SQLite en tempfile, fixtures de démo versionnées (data/fixtures.json).
+        working-directory: projects/restaurant
+        run: python -m unittest discover -s tests -v
+
   compose-validate:
     name: docker compose config (env_file optional, anchor merge)
     runs-on: ubuntu-latest
