@@ -5,6 +5,29 @@
 > Tout a été validé par exécution réelle sur OpenJeff. Aucun e-mail envoyé, aucun site
 > publié publiquement, aucun paiement : c'est volontaire et c'est le comportement sûr par défaut.
 
+## 0. Incrément 2 — runtime 24/7 + désinscription (2026-05-31, autonome)
+
+Ajouté après le socle initial, **sans intervention humaine** et toujours en dry-run :
+
+- **File de tâches** (`pipeline/tasks.py`) sur la table `tasks` (claim atomique
+  `BEGIN IMMEDIATE`, priorités, statuts) — gabarit `agents/telegram/tasks.py`.
+- **Worker résident** (`pipeline/worker.py`) : `serve()` (boucle systemd) + `drain()`
+  (tests / ponctuel). Dispatch des étapes `discover` / `process` / `purge_expired`.
+  Garde-fou : refus de tourner en config ambiguë (`dry_run=false` sans `send_enabled`).
+- **Coordinator** (`pipeline/coordinator.py`) : planifie le cycle quotidien en file
+  (purge des sites expirés, puis découverte→qualif→site→e-mail). Décision/exécution
+  séparées, comme l'archi bot/worker Galaxia.
+- **Désinscription & retrait** (`pipeline/unsubscribe.py`) — **le maillon de conformité,
+  prérequis à tout envoi** : token → `suppression_list` (irréversible) + prospect
+  `suppressed` ; retrait de site par slug. Idempotent.
+- **Unités systemd inertes** (`ops/galaxia-restaurant-{worker.service,coordinator.service,coordinator.timer}`),
+  durcies (`NoNewPrivileges`, `ProtectSystem`), **non installées** (commande d'install
+  documentée en tête de fichier).
+- **6 tests runtime** (`tests/test_runtime.py`) → **12/12 tests verts** au total. Cycle
+  `coordinator → worker` vérifié : 2 tâches planifiées → 4 traitées → 2 contactés (dry-run),
+  2 rejetés, file vidée, 0 erreur ; opt-out re-vérifié (un prospect supprimé n'est pas
+  re-contacté même remis en file).
+
 ## 1. Résumé de ce qui a été créé
 
 Un **socle complet, documenté et exécutable** pour le système, arrêté au stade dry-run :
