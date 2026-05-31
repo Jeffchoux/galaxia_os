@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from pipeline import config, db, discovery, email_gen, run_dry  # noqa: E402
+from pipeline import config, content, db, discovery, email_gen, run_dry  # noqa: E402
 
 
 class DryRunPipeline(unittest.TestCase):
@@ -93,6 +93,94 @@ class DryRunPipeline(unittest.TestCase):
         self.assertIn("noindex", html)
         self.assertIn("Aperçu non officiel généré par Galaxia", html)
         self.assertIn("Supprimer ce site", html)
+
+
+class ContentEnrichment(unittest.TestCase):
+    """Enrichissement Ollama du texte neutre — opt-in, fact-safe, sans réseau ici."""
+
+    BUSINESS = {"name": "Chez Test", "city": "Tours", "category": "italien",
+                "address": "1 rue des Tests", "phone": "0102030405"}
+
+    def test_disabled_by_default_no_network(self):
+        # Sentinelle : si le réseau était sollicité, le test casserait.
+        import pipeline.llm as llm_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("aucun appel LLM ne doit avoir lieu quand désactivé")
+
+        orig = llm_mod.generate
+        llm_mod.generate = _boom
+        try:
+            cfg = config.load_config()
+            cfg.setdefault("llm", {})["content_enrichment"] = False
+            c = content.build_content(self.BUSINESS, cfg)
+        finally:
+            llm_mod.generate = orig
+        self.assertFalse(c["enrichment"]["used"])
+        self.assertEqual(c["enrichment"]["model"], "deterministic")
+        self.assertIn("Chez Test vous accueille", c["about"])
+
+    def test_validate_rejects_invented_facts(self):
+        original = "Chez Test vous accueille à Tours. Page générée automatiquement."
+        # chiffre halluciné (faux horaire/prix/année)
+        ok, why = content._validate_enrichment(original, original + " Ouvert depuis 1990.")
+        self.assertFalse(ok)
+        self.assertIn(why, ("chiffre inventé", "allégation invérifiable"))
+        # superlatif invérifiable
+        ok2, _ = content._validate_enrichment(original, "Le meilleur restaurant de Tours.")
+        self.assertFalse(ok2)
+        # vide
+        self.assertFalse(content._validate_enrichment(original, "   ")[0])
+
+    def test_validate_accepts_clean_rephrase(self):
+        original = "Chez Test vous accueille à Tours. Page générée automatiquement."
+        clean = "Bienvenue chez Chez Test, à Tours. Cette page a été générée automatiquement."
+        ok, why = content._validate_enrichment(original, clean)
+        self.assertTrue(ok, why)
+
+    def test_enabled_uses_clean_output_and_falls_back(self):
+        import pipeline.llm as llm_mod
+        cfg = config.load_config()
+        cfg.setdefault("llm", {})["content_enrichment"] = True
+        orig = llm_mod.generate
+
+        # 1) sortie propre acceptée (longueur comparable à l'original, sans fait inventé)
+        def _clean(prompt, c, **k):
+            return {"text": ("Bienvenue chez Chez Test, à Tours. Cette page est un aperçu de "
+                             "site web généré automatiquement à partir d'informations publiques. "
+                             "Le restaurateur peut la personnaliser et la compléter en quelques "
+                             "instants."),
+                    "model": "ollama:test", "provider": "ollama", "duration_ms": 5,
+                    "cost_usd": 0.0, "ok": True, "error": None}
+        llm_mod.generate = _clean
+        try:
+            c = content.build_content(self.BUSINESS, cfg)
+        finally:
+            llm_mod.generate = orig
+        self.assertTrue(c["enrichment"]["used"])
+        self.assertEqual(c["enrichment"]["cost_usd"], 0.0)
+        self.assertIn("automatiquement", c["about"])
+
+        # 2) sortie hallucinée rejetée -> repli déterministe
+        def _hallu(prompt, c, **k):
+            return {"text": "Le meilleur restaurant, étoilé depuis 1985 !",
+                    "model": "ollama:test", "provider": "ollama", "duration_ms": 5,
+                    "cost_usd": 0.0, "ok": True, "error": None}
+        llm_mod.generate = _hallu
+        try:
+            c2 = content.build_content(self.BUSINESS, cfg)
+        finally:
+            llm_mod.generate = orig
+        self.assertFalse(c2["enrichment"]["used"])
+        self.assertIn("Chez Test vous accueille", c2["about"])
+
+    def test_generate_returns_safe_dict_on_failure(self):
+        import pipeline.llm as llm_mod
+        cfg = {"llm": {"ollama": {"base_url": "http://127.0.0.1:1", "model": "x"}}}
+        res = llm_mod.generate("ping", cfg, timeout=0.2)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["cost_usd"], 0.0)
+        self.assertEqual(res["text"], "")
 
 
 if __name__ == "__main__":

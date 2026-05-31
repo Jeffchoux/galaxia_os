@@ -52,6 +52,7 @@ audit:
 # --- Modèles LLM (politique : pas de premium par défaut) -------------------
 llm:
   default_provider: ollama      # local, gratuit, souverain
+  content_enrichment: false     # reformulation stylistique du texte neutre via Ollama (opt-in)
   ollama:
     base_url: http://127.0.0.1:11434
     model: llama3.1:8b

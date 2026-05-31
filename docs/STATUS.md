@@ -1,7 +1,36 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **projet « restaurant » : enrichissement de contenu Ollama branché (étape autonome n°1)**. `content.py` peut désormais reformuler le **texte neutre** de présentation via Ollama local (`llm.py`, souverain, 0 €), **désactivé par défaut** (`llm.content_enrichment: false`), avec un **garde-fou « aucun fait inventé »** (rejet de tout chiffre/superlatif/distinction hallucinés → repli déterministe) et **traçage du coût (0 €) dans `agent_runs`**. Toujours **Anneau 0 (dry-run total)**. 17 tests verts (12 → 17). Détail § « Restaurant — enrichissement Ollama » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Restaurant — enrichissement Ollama (2026-05-31, session root)
+
+**Étape autonome n°1** du plan `projects/restaurant/docs/09_IMPLEMENTATION_REPORT.md` §6
+(« brancher Ollama dans `content.py` »), réalisée sans intervention humaine, **toujours en
+dry-run** (aucun envoi, aucune publication, aucun paiement).
+
+**Livré (17 tests verts ; dry-run de bout en bout OK) :**
+- **`pipeline/llm.py`** (nouveau) : client Ollama souverain, **stdlib `urllib` seul** (zéro
+  dépendance, empaquetable dans les filles), `generate(prompt, cfg, …)` non-stream → dict
+  `{text, model, duration_ms, cost_usd=0, ok, error}`. **Ne lève jamais** : daemon absent/lent
+  → `ok=False`, l'appelant retombe sur le déterministe.
+- **`pipeline/content.py`** : `_maybe_enrich()` reformule **uniquement le paragraphe neutre**
+  `about` (aucune allégation factuelle ; les faits collectés ne passent jamais par le LLM).
+  **Opt-in** (`llm.content_enrichment: false` par défaut) → import paresseux, zéro coût/zéro
+  réseau quand désactivé. **Garde-fou `_validate_enrichment()`** : rejette toute sortie vide,
+  trop courte/longue, contenant un **chiffre absent de l'original** (horaire/prix/année
+  hallucinés) ou une **allégation invérifiable** (meilleur, étoilé, michelin, depuis 19xx…) →
+  repli sur le texte déterministe. `build_content` expose `enrichment` (used/model/cost/reason).
+- **`pipeline/run_dry.py`** : trace désormais un run `content` **réel** par prospect dans
+  `agent_runs` (modèle + durée + **coût 0 €**), à la place du faux modèle « (simulé) ».
+- **`config/default.yaml`** : flag `llm.content_enrichment: false` (conforme « pas de premium
+  par défaut » et défaut sûr dry-run).
+
+**Vérifié en réel** : Ollama `llama3.1:8b` joignable (127.0.0.1:11434), enrichissement live
+accepté par le garde-fou (≈17 s/fiche sur CPU). **Limite connue** : un 8B peut ajouter une
+flaveur géographique douce (« charmant centre-ville ») que le garde-fou actuel (chiffres +
+superlatifs) ne bloque pas — d'où **désactivé par défaut + veto QA** ; durcir le garde-fou si
+on active en Anneau 1. **Suite (étape n°2)** : découverte Overpass lecture seule, dry-run.
 
 ## Vocaux Telegram → transcription Whisper (2026-05-31, session galaxia)
 
