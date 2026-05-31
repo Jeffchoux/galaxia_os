@@ -1,0 +1,22 @@
+[Unit]
+Description=Galaxia — worker autonome des ordres Telegram (exécute via Claude Code headless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project
+# Clés LLM + GH (mêmes que l'agent coder) PUIS token du bot pour répondre sur Telegram.
+EnvironmentFile=/opt/galaxia/config/.env
+EnvironmentFile=/home/galaxia/galaxia-project/agents/telegram/.env
+ExecStart=/home/galaxia/.claude/galaxia/venv/bin/python /home/galaxia/galaxia-project/agents/telegram/worker.py
+Restart=on-failure
+RestartSec=5
+Nice=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

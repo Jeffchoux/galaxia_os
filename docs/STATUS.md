@@ -1,7 +1,29 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-30 (soir)** — **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Vocaux Telegram → transcription Whisper (2026-05-31, session galaxia)
+
+**Ordre de Jeff (Telegram) :** « Galaxia doit pouvoir décrypter l'audio ». Jusqu'ici le
+bot Telegram traitait texte / liens média / PDF / images, mais **ignorait les messages
+vocaux** — Jeff ne pouvait pas parler à Galaxia depuis Telegram.
+
+**Livré (déployé, restart `galaxia-bot` 02:39 UTC) :**
+- **`agents/telegram/telegram_bot.py`** : nouveau handler `handle_voice` branché sur
+  `filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE`. Télécharge l'audio, le transcrit
+  via le daemon Whisper local (port 5502, `faster-whisper large-v3-turbo`), renvoie à Jeff
+  « 🎙️ J'ai entendu : … » **puis route le texte transcrit dans le même pipeline** que les
+  messages tapés (`_route_text`, extrait de `handle_message`) → Jeff peut **donner un ordre
+  ou converser à la voix**. Garde-fou taille 20 Mo (plafond getFile Telegram).
+- **`agents/telegram/media.py`** : helper public `transcribe_audio(bytes, filename, lang)`
+  réutilisable (l'ancien `_transcribe(Path)` du pipeline média l'appelle désormais).
+- **Souverain & gratuit** : aucune dépendance cloud — tout passe par le Whisper local déjà
+  en place. pyav côté daemon gère OGG/Opus (format natif des vocaux Telegram), m4a, mp3, wav.
+- **Vérifié bout-à-bout** : OGG/Opus généré localement → POST daemon → texte FR retourné. ✅
+
+**Reste :** non commité (working tree). À brancher + PR avec les autres fichiers
+`agents/telegram/` non versionnés (worker, tasks, llm — cf. § ci-dessous).
 
 ## Chat gratuit outillé + sélecteur de modèle visible (2026-05-30 soir, session root)
 
