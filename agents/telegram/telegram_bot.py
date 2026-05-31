@@ -7,10 +7,13 @@ dédiée "📱 Inbox Telegram" auto-créée.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 import logging
 import os
 import re
+import signal
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +27,9 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+import llm
+import tasks
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 ALLOWED_CHAT_ID = int(os.environ.get("ALLOWED_CHAT_ID", "0"))
@@ -54,9 +60,12 @@ ALLOWED_MIME = {
 }
 IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 Mo (limite Anthropic vision)
+# 20 Mo : plafond de téléchargement de l'API Bot Telegram (getFile).
+MAX_AUDIO_BYTES = 20 * 1024 * 1024
 
 URL_RE = re.compile(
-    r"https?://(?:[a-z0-9.-]+\.)?(?:tiktok\.com|x\.com|twitter\.com)/[^\s]+",
+    r"https?://(?:[a-z0-9.-]+\.)?"
+    r"(?:tiktok\.com|x\.com|twitter\.com|youtube\.com|youtu\.be|instagram\.com)/[^\s]+",
     re.IGNORECASE,
 )
 
@@ -102,94 +111,168 @@ async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("📥 Inbox vide.")
 
 
+def _history_path(chat_id: int) -> Path:
+    return Path.home() / f".claude/galaxia/tg_chat_{chat_id}.json"
+
+
+def _load_history(chat_id: int) -> list[dict]:
+    try:
+        return json.loads(_history_path(chat_id).read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _save_history(chat_id: int, history: list[dict]) -> None:
+    p = _history_path(chat_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(history[-40:], ensure_ascii=False), encoding="utf-8")
+
+
+def _capture_urls(text: str) -> int:
+    """Range les liens TikTok/X dans l'inbox. Retourne le nombre ajouté."""
+    matches = list(URL_RE.finditer(text))
+    if not matches:
+        return 0
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    INBOX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with INBOX_PATH.open("a", encoding="utf-8") as f:
+        for m in matches:
+            f.write(f"- {ts} | {classify(m.group(0))} | {m.group(0)}\n")
+    return len(matches)
+
+
+async def _launch_task(update: Update, chat_id: int, order: str) -> None:
+    """Enqueue un ordre ; le service galaxia-tg-worker le prendra en charge."""
+    try:
+        tid = await asyncio.to_thread(tasks.enqueue, chat_id, order)
+    except Exception as e:  # noqa: BLE001
+        await update.effective_message.reply_text(f"❌ Impossible d'enregistrer l'ordre : {e}")
+        return
+    await update.effective_message.reply_text(
+        f"🛠️ Reçu, je m'y mets ({tid[:8]}). Je te réponds ici dès que c'est fait.\n"
+        f"/tasks pour voir l'avancement · /stop pour tout annuler."
+    )
+
+
 async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     if not is_authorized(chat_id):
         log.warning("rejected message from chat_id=%s", chat_id)
         return
 
-    text = update.effective_message.text or update.effective_message.caption or ""
-    matches = list(URL_RE.finditer(text))
-    if not matches:
-        await update.effective_message.reply_text("❌ Aucune URL TikTok/X détectée.")
+    text = (update.effective_message.text or update.effective_message.caption or "").strip()
+    if not text:
         return
 
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    added: list[str] = []
-    INBOX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with INBOX_PATH.open("a", encoding="utf-8") as f:
-        for m in matches:
-            url = m.group(0)
-            kind = classify(url)
-            f.write(f"- {ts} | {kind} | {url}\n")
-            added.append(kind)
+    await _route_text(update, ctx, chat_id, text)
 
-    # Compte total dans l'inbox pour le rappel
+
+async def _route_text(
+    update: Update, ctx: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str
+) -> None:
+    """Aiguille un texte (tapé ou transcrit depuis un vocal) : lien média,
+    ordre à exécuter, ou simple conversation."""
+    # 1) Lien média SEUL (sans vraie phrase autour) → traitement IMMÉDIAT (download +
+    #    transcription + résumé) ET capture inbox pour le digest quotidien.
+    urls = [m.group(0) for m in URL_RE.finditer(text)]
+    if urls and len(URL_RE.sub("", text).strip()) < 4:
+        _capture_urls(text)  # garde la trace pour le brief de 06:30
+        for url in urls:
+            try:
+                await asyncio.to_thread(tasks.enqueue, chat_id, url, "media")
+            except Exception as e:  # noqa: BLE001
+                await update.effective_message.reply_text(f"❌ Impossible d'enregistrer le lien : {e}")
+                return
+        await update.effective_message.reply_text(
+            f"🎬 {len(urls)} lien(s) reçu(s). Je télécharge, transcris et résume — "
+            f"je t'envoie le résultat ici dans une minute."
+        )
+        return
+
+    # 2) Sinon : conversation ou ordre. Groq (gratuit) tranche.
+    await ctx.bot.send_chat_action(chat_id=chat_id, action="typing")
+    intent, reason = await asyncio.to_thread(llm.classify_intent, text)
+    log.info("intent=%s (%s) | %.60s", intent, reason, text)
+
+    if intent == "task":
+        await _launch_task(update, chat_id, text)
+        return
+
+    # 3) Conversation via Groq, avec mémoire courte par chat.
+    history = _load_history(chat_id)
     try:
-        pending = sum(1 for l in INBOX_PATH.read_text(encoding="utf-8").splitlines() if l.strip())
-    except Exception:
-        pending = len(added)
+        reply = await asyncio.to_thread(llm.groq_chat, history, text)
+    except Exception as e:  # noqa: BLE001
+        log.exception("groq chat failed")
+        await update.effective_message.reply_text(f"❌ LLM conversation indisponible : {e}")
+        return
+    history.append({"role": "user", "content": text})
+    history.append({"role": "assistant", "content": reply})
+    _save_history(chat_id, history)
+    await update.effective_message.reply_text(reply)
 
-    summary = ", ".join(added)
-    ack = (
-        f"✅ {len(added)} lien(s) reçu(s) ({summary}). Galaxia va l'analyser au prochain digest "
-        f"(quotidien 06:30 UTC) — utilise /digest pour déclencher tout de suite.\n"
-        f"📥 Inbox actuelle : {pending} item(s) en attente.\n"
-        f"📊 Dernier brief : https://app.galaxia-os.com"
+
+async def cmd_do(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Force l'exécution d'un ordre (court-circuite le classifieur)."""
+    if not is_authorized(update.effective_chat.id):
+        return
+    order = (update.effective_message.text or "").partition(" ")[2].strip()
+    if not order:
+        await update.effective_message.reply_text("Usage : /do <ordre à exécuter>")
+        return
+    await _launch_task(update, update.effective_chat.id, order)
+
+
+async def cmd_stop(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Kill-switch : annule toutes les tâches actives (même user → pas de sudo)."""
+    if not is_authorized(update.effective_chat.id):
+        return
+    active = await asyncio.to_thread(tasks.active_tasks)
+    if not active:
+        await update.effective_message.reply_text("Rien en cours.")
+        return
+    killed = 0
+    for t in active:
+        tasks.set_status(t["id"], "killed")
+        pgid = t.get("pgid")
+        if pgid:
+            try:
+                os.killpg(int(pgid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, ValueError):
+                pass
+        killed += 1
+    await update.effective_message.reply_text(f"🛑 {killed} tâche(s) annulée(s).")
+
+
+async def cmd_tasks(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Liste les tâches actives."""
+    if not is_authorized(update.effective_chat.id):
+        return
+    active = await asyncio.to_thread(tasks.active_tasks)
+    if not active:
+        await update.effective_message.reply_text("Aucune tâche en cours.")
+        return
+    lines = "\n".join(
+        f"• {t['id'][:8]} — {t['status']} — {t['prompt'][:40]}" for t in active
     )
-    await update.effective_message.reply_text(ack)
+    await update.effective_message.reply_text(f"🛠️ Tâches :\n{lines}")
 
 
 async def cmd_digest(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Déclenche le digest immédiat (transcription Whisper + analyse Claude)."""
+    """Déclenche le digest immédiat via le worker (le bot ne peut pas sudo :
+    NoNewPrivileges). Le worker lance process_inbox.py et renvoie le brief."""
     if not is_authorized(update.effective_chat.id):
         return
-    import asyncio
-    await update.effective_message.reply_text(
-        "🔄 Digest déclenché… (transcription Whisper + analyse Claude, ~3-5 min). "
-        "Je te ping quand le brief est prêt."
-    )
-    # Lance le digest en non-bloquant via systemctl start
-    proc = await asyncio.create_subprocess_exec(
-        "/usr/bin/sudo", "-n", "/usr/bin/systemctl", "start", "galaxia-digest.service",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        msg = stderr.decode(errors="replace").strip() or f"exit {proc.returncode}"
-        await update.effective_message.reply_text(f"❌ Digest start a échoué : {msg}")
+    chat_id = update.effective_chat.id
+    try:
+        tid = await asyncio.to_thread(tasks.enqueue, chat_id, "digest", "digest")
+    except Exception as e:  # noqa: BLE001
+        await update.effective_message.reply_text(f"❌ Impossible de lancer le digest : {e}")
         return
-    # Watch la complétion en arrière-plan (poll systemctl)
-    asyncio.create_task(_watch_digest_completion(update))
-
-
-async def _watch_digest_completion(update: Update) -> None:
-    import asyncio
-    for _ in range(120):  # max 10 min
-        await asyncio.sleep(5)
-        proc = await asyncio.create_subprocess_exec(
-            "/usr/bin/systemctl", "is-active", "galaxia-digest.service",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        if out.decode().strip() != "active":
-            # Service has finished (either success or failure)
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            brief_path = Path.home() / f".claude/galaxia/briefs/{today}.md"
-            if brief_path.exists():
-                # Read first 600 chars of the brief as preview
-                content = brief_path.read_text(encoding="utf-8")[:600]
-                await update.effective_message.reply_text(
-                    f"✅ Brief prêt — {today} :\n\n{content}\n\n"
-                    f"📊 Détail complet : https://app.galaxia-os.com"
-                )
-            else:
-                await update.effective_message.reply_text(
-                    "❌ Digest terminé mais aucun brief produit (voir logs systemd)."
-                )
-            return
-    await update.effective_message.reply_text("⏱ Digest toujours en cours après 10 min, je lâche le watch.")
+    await update.effective_message.reply_text(
+        f"🔄 Digest lancé ({tid[:8]}) — transcription Whisper + analyse Claude (~3-5 min). "
+        f"Je t'envoie le brief ici dès qu'il est prêt."
+    )
 
 
 def _now_ms() -> int:
@@ -391,6 +474,82 @@ async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _audio_filename(media_obj) -> str:
+    """Déduit un nom de fichier (avec extension) pour aider le daemon Whisper.
+
+    Telegram : Voice → audio/ogg (opus), Audio → file_name/mime, VideoNote → mp4.
+    """
+    fname = getattr(media_obj, "file_name", None)
+    if fname:
+        return fname
+    mime = (getattr(media_obj, "mime_type", None) or "").lower()
+    ext = {
+        "audio/ogg": ".ogg",
+        "audio/opus": ".ogg",
+        "audio/mpeg": ".mp3",
+        "audio/mp4": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "video/mp4": ".mp4",
+    }.get(mime, ".ogg")
+    return f"voice{ext}"
+
+
+async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Réceptionne un vocal / fichier audio / note vidéo Telegram, le transcrit
+    (daemon Whisper local) puis route le texte comme un message ordinaire :
+    Jeff peut ainsi donner un ordre ou converser à la voix."""
+    if not is_authorized(update.effective_chat.id):
+        log.warning("rejected voice from chat_id=%s", update.effective_chat.id)
+        return
+
+    chat_id = update.effective_chat.id
+    msg = update.effective_message
+    media_obj = msg.voice or msg.audio or msg.video_note
+    if not media_obj:
+        return
+
+    size = getattr(media_obj, "file_size", 0) or 0
+    if size and size > MAX_AUDIO_BYTES:
+        await msg.reply_text(
+            f"❌ Audio trop long ({size // 1024 // 1024} Mo). "
+            f"Max {MAX_AUDIO_BYTES // 1024 // 1024} Mo (limite Telegram). "
+            f"Pour un long enregistrement, envoie-le en plusieurs morceaux."
+        )
+        return
+
+    await ctx.bot.send_chat_action(chat_id=chat_id, action="typing")
+    try:
+        file = await media_obj.get_file()
+        payload = bytes(await file.download_as_bytearray())
+    except Exception as e:  # noqa: BLE001
+        log.exception("telegram voice download failed")
+        await msg.reply_text(f"❌ Téléchargement Telegram a échoué : {e}")
+        return
+
+    import media  # local : ne charge requests qu'au besoin
+
+    filename = _audio_filename(media_obj)
+    try:
+        text = await asyncio.to_thread(media.transcribe_audio, payload, filename)
+    except Exception as e:  # noqa: BLE001
+        log.exception("whisper transcription failed")
+        await msg.reply_text(
+            f"❌ Transcription indisponible ({e}). "
+            f"Le daemon Whisper (port 5502) tourne-t-il ?"
+        )
+        return
+
+    if not text:
+        await msg.reply_text("🎙️ Audio reçu mais transcription vide (silence ou bruit ?).")
+        return
+
+    # Montre à Jeff ce qui a été compris, puis agit dessus.
+    await msg.reply_text(f"🎙️ J'ai entendu :\n« {text} »")
+    await _route_text(update, ctx, chat_id, text)
+
+
 async def cmd_brief(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Renvoie le dernier brief disponible."""
     if not is_authorized(update.effective_chat.id):
@@ -420,8 +579,16 @@ def main() -> None:
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("digest", cmd_digest))
     app.add_handler(CommandHandler("brief", cmd_brief))
+    app.add_handler(CommandHandler("do", cmd_do))
+    app.add_handler(CommandHandler("stop", cmd_stop))
+    app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(
+        MessageHandler(
+            filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE, handle_voice
+        )
+    )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     log.info(
         "Galaxia bot démarré (inbox=%s, allowed_chat_id=%s)",
