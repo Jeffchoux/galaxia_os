@@ -332,3 +332,38 @@ worktree `/home/galaxia/cowork-build`) :
 vérification de bout en bout en attente** (intégration & build faits par
 l'humain). Voir [`STATUS.md`](STATUS.md) § « Cowork autonome » et
 [`COWORK.md`](COWORK.md).
+
+---
+
+## 2026-05-31 — Q15.1 : envoi e-mail restaurant — domaine + prestataire
+
+**Posée le :** 2026-05-28
+**Tranchée le :** 2026-05-31
+**Réponse de Jeff** : sous-domaine de `galaxia-os.com` + **Scaleway TEM**.
+
+**Décision** :
+- **Domaine d'envoi** = un **sous-domaine dédié de `galaxia-os.com`** (proposé
+  `mail.galaxia-os.com`, label exact à confirmer au moment de la config DNS) —
+  **jamais** `app.galaxia-os.com`. La réputation d'envoi reste ainsi isolée du
+  domaine applicatif. (Choix d'un sous-domaine plutôt qu'un domaine `.fr` séparé :
+  gratuit et immédiat ; couplage de réputation accepté pour un volume modéré.)
+- **Prestataire** = **Scaleway TEM** (Transactional Email), région `fr-par`,
+  100 % UE / souverain (cohérent ADN Galaxia, anti-CLOUD Act). Démarrage quasi
+  gratuit (300 mails/mois, puis 0,25 €/1000) ; **IP dédiée via le plan Scale**
+  quand le volume le justifiera, pour maîtriser warm-up et réputation.
+
+**Conséquences (à venir — TOUJOURS en dry-run tant que 15.2 / 15.4 non tranchées)** :
+- DNS : poser **SPF + DKIM + DMARC** sur le sous-domaine d'envoi (zone
+  `galaxia-os.com`).
+- Secrets : clé API Scaleway TEM dans `/opt/galaxia/config/.env` (jamais committée).
+- Intégration : l'`email_agent` cible ce sous-domaine + l'API Scaleway, mais reste
+  `send_enabled:false` (aucun envoi réel) jusqu'à 15.2 (base légale) et 15.4
+  (adresse postale).
+
+**Reste côté Jeff pour activer concrètement** :
+- Créer le **compte Scaleway** (facturation) + générer une **clé API TEM**.
+- Donner accès à la **zone DNS de `galaxia-os.com`** (ou poser les 3
+  enregistrements que je fournirai).
+
+**Toujours ouvert dans §15** : 15.2 (base légale), 15.3 (Stripe), 15.4 (adresse
+postale).

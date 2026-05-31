@@ -286,8 +286,10 @@ Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + on
 ## 15. Projet « restaurant » — bloquants AVANT tout envoi d'e-mail réel
 
 **Posée le :** 2026-05-28
-**Statut :** ouverte — **n'empêche rien pour l'instant** (le système est livré et tourne en
-**dry-run total** : aucun e-mail envoyé, aucun site publié, aucun paiement).
+**Statut :** partiellement tranchée — **15.1 réglée le 2026-05-31** (domaine + prestataire,
+voir [`docs/DECISIONS.md`](docs/DECISIONS.md)) ; **15.2 / 15.3 / 15.4 toujours ouvertes**.
+N'empêche rien pour l'instant (le système est livré et tourne en **dry-run total** : aucun
+e-mail envoyé, aucun site publié, aucun paiement).
 
 J'ai construit de bout en bout le système autonome « restaurant » (génère des sites pour
 restos à faible présence web, les héberge, les contacte, les convertit à 10 €/mois). Détail
@@ -296,10 +298,13 @@ dry-run. Je continue seul tout le travail interne (Ollama, découverte OSM en le
 worker 24/7, page de désinscription). **Mais 4 décisions te reviennent** car ce sont des
 risques juridiques / financiers / de réputation — je ne les prends pas seul :
 
-**15.1 — Envoi d'e-mail : domaine + prestataire.** On ne peut PAS envoyer depuis l'IP/le
-domaine de Galaxia (ça brûlerait la réputation de `app.galaxia-os.com`). Il faut un
-**domaine d'envoi dédié** + SPF/DKIM/DMARC + un **prestataire transactionnel**. Veux-tu que
-je provisionne un domaine dédié et que je propose 2-3 prestataires ?
+**15.1 — Envoi d'e-mail : domaine + prestataire. ✅ TRANCHÉE le 2026-05-31.**
+Choix de Jeff : **sous-domaine dédié de `galaxia-os.com`** (proposé `mail.galaxia-os.com`,
+jamais `app.galaxia-os.com`) + **Scaleway TEM** (transactionnel souverain `fr-par`, IP
+dédiée via plan Scale au besoin). Détail et suites dans
+[`docs/DECISIONS.md`](docs/DECISIONS.md) § « 2026-05-31 — Q15.1 ». Reste côté Jeff pour
+activer : créer le compte Scaleway + clé API TEM, et donner accès à la zone DNS pour poser
+SPF/DKIM/DMARC.
 
 **15.2 — Base légale prospection B2B.** Je ne contacte que des adresses **génériques**
 (`contact@`, `info@`) de restaurants, base « intérêt légitime », opt-out 1 clic — conforme
@@ -313,5 +318,5 @@ ouvres le compte Stripe, ou je prépare tout et tu valides ?
 adresse afficher comme expéditeur ?
 
 **Impact si pas tranché :** **aucun blocage du travail** — je reste en dry-run et j'avance
-sur tout l'interne. Mais aucun e-mail réel ne partira tant que 15.1, 15.2 et 15.4 ne sont
+sur tout l'interne. Mais aucun e-mail réel ne partira tant que 15.2 et 15.4 ne sont
 pas réglés (c'est le garde-fou voulu), et aucune facturation tant que 15.3 ne l'est pas.
