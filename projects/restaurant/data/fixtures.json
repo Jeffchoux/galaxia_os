@@ -1,0 +1,95 @@
+{
+  "_comment": "Données FICTIVES pour le dry-run. Aucun vrai commerce, domaines example.* réservés RFC2606. En production, l'agent discovery interroge l'API Overpass (OpenStreetMap, ODbL) — voir docs/03.",
+  "businesses": [
+    {
+      "external_id": "fixture-1",
+      "name": "Le Petit Tournesol",
+      "category": "restaurant",
+      "address": "12 rue des Halles",
+      "city": "Tours",
+      "postal_code": "37000",
+      "country": "FR",
+      "lat": 47.3941,
+      "lon": 0.6848,
+      "phone": "+33 2 47 00 00 01",
+      "email": "contact@petit-tournesol.example",
+      "existing_website": null,
+      "cuisine": "française, bistrot",
+      "audit_fixture": {
+        "has_website": false,
+        "reachable": false,
+        "score": 5,
+        "weakness_summary": "Aucun site web. Présence uniquement sur des annuaires tiers."
+      }
+    },
+    {
+      "external_id": "fixture-2",
+      "name": "Trattoria da Marco",
+      "category": "restaurant",
+      "address": "5 place Jean Jaurès",
+      "city": "Tours",
+      "postal_code": "37000",
+      "country": "FR",
+      "phone": "+33 2 47 00 00 02",
+      "email": "info@trattoria-damarco.example",
+      "existing_website": "http://trattoria-damarco.example",
+      "cuisine": "italienne, pizza, pâtes",
+      "audit_fixture": {
+        "has_website": true,
+        "reachable": true,
+        "is_https": false,
+        "mobile_friendly": false,
+        "load_ms": 6200,
+        "ssl_valid": false,
+        "is_parking_page": false,
+        "score": 32,
+        "weakness_summary": "Site en HTTP non sécurisé, non responsive mobile, très lent (6,2 s), design daté."
+      }
+    },
+    {
+      "external_id": "fixture-3",
+      "name": "Sushi Loire",
+      "category": "restaurant",
+      "address": "88 avenue de Grammont",
+      "city": "Tours",
+      "postal_code": "37000",
+      "country": "FR",
+      "phone": "+33 2 47 00 00 03",
+      "email": "jean.dupont@gmail.example",
+      "existing_website": null,
+      "cuisine": "japonaise, sushi",
+      "note": "Cas REJET attendu : seule une adresse NOMINATIVE est connue → non contactable (docs/01 §4).",
+      "audit_fixture": {
+        "has_website": false,
+        "reachable": false,
+        "score": 10,
+        "weakness_summary": "Pas de site, mais aucune adresse de contact générique publique."
+      }
+    },
+    {
+      "external_id": "fixture-4",
+      "name": "Brasserie du Château",
+      "category": "restaurant",
+      "address": "2 rue Porte Côté",
+      "city": "Blois",
+      "postal_code": "41000",
+      "country": "FR",
+      "phone": "+33 2 54 00 00 04",
+      "email": "reservation@brasserie-chateau.example",
+      "existing_website": "https://brasserie-chateau.example",
+      "cuisine": "française, brasserie, terroir",
+      "note": "Cas REJET attendu : site existant déjà correct (score élevé) → pas une cible.",
+      "audit_fixture": {
+        "has_website": true,
+        "reachable": true,
+        "is_https": true,
+        "mobile_friendly": true,
+        "load_ms": 900,
+        "ssl_valid": true,
+        "is_parking_page": false,
+        "score": 88,
+        "weakness_summary": "Site moderne, rapide, responsive et sécurisé. Aucun besoin."
+      }
+    }
+  ]
+}

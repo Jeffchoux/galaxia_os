@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +20,17 @@ import llm
 
 WHISPER_URL = os.environ.get("GALAXIA_WHISPER_URL", "http://127.0.0.1:5502")
 YTDLP = os.environ.get("YTDLP_BIN", "/home/galaxia/.claude/galaxia/venv/bin/yt-dlp")
+
+
+def _check_ytdlp() -> str | None:
+    """Retourne un message d'erreur lisible si yt-dlp est introuvable, sinon None."""
+    if shutil.which(YTDLP) is None and not Path(YTDLP).is_file():
+        return (
+            f"yt-dlp introuvable ({YTDLP}). "
+            "Installez-le : pip install yt-dlp  ou  apt install yt-dlp  "
+            "puis vérifiez la variable YTDLP_BIN."
+        )
+    return None
 
 
 def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
@@ -89,6 +101,10 @@ def _transcribe(audio: Path) -> str:
 
 def process_media(url: str) -> str:
     """Traite un lien média de bout en bout. Retourne le texte à renvoyer à Jeff."""
+    ytdlp_err = _check_ytdlp()
+    if ytdlp_err:
+        return f"⚠️ Dépendance manquante — {ytdlp_err}"
+
     info = _info(url)
     title = info.get("title") or info.get("description", "")[:80] or "(sans titre)"
     author = info.get("uploader") or info.get("channel") or info.get("creator") or ""

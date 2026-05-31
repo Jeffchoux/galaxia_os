@@ -1,7 +1,7 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **projet « restaurant » : découverte OSM/Overpass branchée (étape autonome n°2)**. `discovery.py` interroge désormais l'API Overpass en **LECTURE SEULE** (OpenStreetMap, **ODbL** avec attribution tracée), **opt-in** (`discovery.live: false` par défaut → fixtures, tests/dry-run hermétiques), bornée (cap par run, espacement, User-Agent honnête, backoff sur quota), jeu de champs **minimal** (RGPD). Vérifié en réel sur **Tours** (5 fiches, cap respecté). 22 tests verts (17 → 22). Détail § « Restaurant — découverte Overpass » ci-dessous. Avant : **enrichissement de contenu Ollama branché (étape autonome n°1)**. `content.py` peut désormais reformuler le **texte neutre** de présentation via Ollama local (`llm.py`, souverain, 0 €), **désactivé par défaut** (`llm.content_enrichment: false`), avec un **garde-fou « aucun fait inventé »** (rejet de tout chiffre/superlatif/distinction hallucinés → repli déterministe) et **traçage du coût (0 €) dans `agent_runs`**. Toujours **Anneau 0 (dry-run total)**. 17 tests verts (12 → 17). Détail § « Restaurant — enrichissement Ollama » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **projet « restaurant » : découverte OSM/Overpass branchée (étape autonome n°2)**. `discovery.py` interroge désormais l'API Overpass en **LECTURE SEULE** (OpenStreetMap, **ODbL** avec attribution tracée), **opt-in** (`discovery.live: false` par défaut → fixtures, tests/dry-run hermétiques), bornée (cap par run, espacement, User-Agent honnête, backoff sur quota), jeu de champs **minimal** (RGPD). Vérifié en réel sur **Tours** (5 fiches, cap respecté). 22 tests verts (17 → 22). Détail § « Restaurant — découverte Overpass » ci-dessous. Avant : **enrichissement de contenu Ollama branché (étape autonome n°1)**. `content.py` peut désormais reformuler le **texte neutre** de présentation via Ollama local (`llm.py`, souverain, 0 €), **désactivé par défaut** (`llm.content_enrichment: false`), avec un **garde-fou « aucun fait inventé »** (rejet de tout chiffre/superlatif/distinction hallucinés → repli déterministe) et **traçage du coût (0 €) dans `agent_runs`**. Toujours **Anneau 0 (dry-run total)**. 17 tests verts (12 → 17). Détail § « Restaurant — enrichissement Ollama » ci-dessous. Par ailleurs, déjà mergé sur `main` : **Cowork autonome** (PR #34 — orchestrateur + sandbox Docker, pas encore déployé) et **routeur de tâches souverain « ✨ Auto »** (PR #33, déployé) — voir leurs sections dédiées ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
 
 ## Restaurant — découverte Overpass (2026-05-31, session root)
 
@@ -56,6 +56,95 @@ accepté par le garde-fou (≈17 s/fiche sur CPU). **Limite connue** : un 8B peu
 flaveur géographique douce (« charmant centre-ville ») que le garde-fou actuel (chiffres +
 superlatifs) ne bloque pas — d'où **désactivé par défaut + veto QA** ; durcir le garde-fou si
 on active en Anneau 1. **Suite (étape n°2)** : découverte Overpass lecture seule, dry-run.
+
+## Cowork autonome — orchestrateur + sandbox Docker (2026-05-31)
+
+**Renversement assumé** de la décision « Cowork différé » du 2026-05-30 : Jeff
+a demandé ce jour de **construire** le mode Cowork autonome (cf.
+[`DECISIONS.md`](DECISIONS.md) entrée 2026-05-31). Architecture complète
+documentée dans [`COWORK.md`](COWORK.md).
+
+**Quoi :** le manager donne un **objectif** → l'orchestrateur **PLANIFIE**
+(décompose en un DAG de sous-tâches via le Claude Agent SDK, modèle gratuit par
+défaut) → **GATE d'approbation humaine** pour les sous-tâches `consequential`
+(irréversibles / hors sandbox) → **EXÉCUTE** chaque sous-tâche dans un
+conteneur Docker **jetable et isolé** → **SYNTHÉTISE** un livrable. Avancement
+streamé au cockpit en **SSE** (mêmes frames que le chat).
+
+**Construit sur cette branche (`feat/cockpit-cowork-autonomous`, worktree
+`/home/galaxia/cowork-build`) :**
+
+- **DB** (`apps/cockpit/src/lib/server/db.ts`) : tables `cowork_tasks` +
+  `cowork_subtasks` (CREATE IF NOT EXISTS via `ensureMigrated()`), helpers
+  CRUD + claims atomiques (`BEGIN IMMEDIATE`, mime `tasks.py`), approbation,
+  kill. Statuts figés : tâche `pending→planning→awaiting_approval→running→
+  synthesizing→done|error|killed`, sous-tâche `pending→blocked→
+  awaiting_approval→running→done|error|skipped|killed`, risque
+  `safe|mutating|consequential`.
+- **Routes API** (`apps/cockpit/src/routes/api/cowork/…`) : `POST`/`GET`
+  `/api/cowork`, `GET /api/cowork/[id]`, `GET /api/cowork/[id]/stream` (SSE),
+  `POST /api/cowork/[id]/approve`, `POST /api/cowork/[id]/kill`. Toutes scopées
+  `locals.user`.
+- **Orchestrateur** (`agents/cowork/orchestrator.mjs`) : démon unique à longue
+  durée de vie (cible : service `galaxia-cowork.service`), boucle
+  POLL→PLAN→GATE→EXECUTE→SYNTHESIZE, schéma Zod `CoworkPlanSchema` (DAG
+  acyclique par construction), plafond `COWORK_MAX_USD_PER_TASK`, kill-switch
+  via `docker kill`.
+- **Sandbox** (`agents/cowork/sandbox/run-subtask.sh` + image
+  `galaxia/cowork-sandbox`) : `docker run --rm --read-only --network=none
+  --cap-drop=ALL --security-opt no-new-privileges --user 1000:1000`, seul
+  `/workspace` monté ; prompt par STDIN, sortie ligne-par-ligne → SSE `log`,
+  dernière ligne = `{"ok",​"summary"}`.
+- **UI cockpit** (`apps/cockpit/src/routes/+page.svelte`) : panneau Cowork
+  câblé sur le bouton « 🤝 Cowork » jusqu'ici désactivé (sibling du panneau
+  mode Code).
+- **Doc** : `docs/COWORK.md` (neuf), maj `PRODUCT-VISION.md`, `DECISIONS.md`,
+  ce fichier.
+
+**Politique modèle respectée** : planner et exécution en **gratuit/peu cher par
+défaut** (`COWORK_PLANNER_MODEL` = `claude-sonnet-4-6`, `COWORK_EXEC_MODEL`
+sonnet/groq) ; Opus seulement sur escalade explicite.
+
+**Reste (humain, ultérieur) :** intégration & build (les agents écrivent le
+code seulement, pas de `git`/`npm`/`docker build`), build de l'image
+`galaxia/cowork-sandbox`, install du service systemd `galaxia-cowork.service`
+(gabarit durci `galaxia-coder.service`), **vérification de bout en bout** (rien
+n'est encore vérifié), puis merge de la branche et déploiement. Packaging Hub &
+Spoke pour les filles à suivre (image + service descendus par updates signées).
+
+## Routeur de tâches souverain — mode « ✨ Auto » (2026-05-31, session root)
+
+**Origine :** Jeff a partagé un post viral « j'utilise 8 outils IA, un par job » et a
+demandé de l'implémenter. Pris au pied de la lettre, le post (8 SaaS propriétaires :
+Claude, Gemini, Blotato, NotebookLM, puzzle.io, Apify, 10Web, Codex) **viole le contrat
+fondateur** (pas de dépendance SaaS, tout empaquetable/offline pour les filles). Décision
+prise avec Jeff (questions explicites) : garder **le principe** (« bon moteur pour la bonne
+tâche »), version **souveraine**, et commencer par le **routage auto coder/chat** — extension
+directe du sélecteur free/pro existant.
+
+**Livré (build `svelte-check` 0 erreur + `vite build` OK ; NON déployé, NON commité) :**
+- **`src/lib/server/router.ts`** (nouveau) : `routeChat(message, hasDocs)` → `{ engine, reason }`.
+  Heuristique **100 % locale, déterministe, zéro coût, zéro réseau** (donc empaquetable tel
+  quel dans les filles). Escalade vers Opus (`pro`) si : verbe d'**écriture de code** (implémente,
+  modifie, corrige, refactor, crée un fichier/fonction, commit, push, déploie…), verbe de
+  **rédaction/com** (rédige, écris-moi un post/mail…), ou **pièce jointe** (le mode rapide ne voit
+  pas les fichiers/images). Sinon `free`. Conforme « pas de premium par défaut » : le défaut reste
+  gratuit, on n'escalade que sur signal clair. Validé sur 12 cas représentatifs (12/12).
+- **`src/routes/api/chat/+server.ts`** : accepte `mode: 'auto'`. En auto, résout via `routeChat`
+  une fois les documents chargés, puis émet un event SSE **`routing` `{engine, reason}`** avant le
+  stream. `'pro'`/`'free'` explicites inchangés ; mode absent → `free` (on **ne change pas** le
+  défaut des clients hors cockpit, ex. Telegram).
+- **`src/routes/+page.svelte`** : le sélecteur passe à 3 modes (**✨ Auto / ⚡ Rapide / 🧠 Opus**),
+  **Auto par défaut** (persisté `localStorage`). Nouvelle ligne discrète sous les messages
+  « ✨ Auto → 🧠 Opus / ⚡ Rapide · <raison> » affichée en mode auto pour rester transparent sur
+  le moteur (et donc le coût) du tour. Aucune régression sur les modes manuels.
+
+**Limites / suites possibles :** (1) heuristique par mots-clés — un cas ambigu peut être mal
+classé ; Jeff peut toujours forcer via le bouton. (2) Prochains « jobs » du post à décliner en
+souverain : « NotebookLM local » (RAG sur les docs), scraping leads façon Apify containerisé.
+
+**À faire :** brancher + PR avec les autres fichiers non commités du working tree, puis
+`sudo systemctl restart galaxia-cockpit.service` pour déployer.
 
 ## Vocaux Telegram → transcription Whisper (2026-05-31, session galaxia)
 

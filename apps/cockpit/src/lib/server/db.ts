@@ -70,6 +70,64 @@ export interface UsageRecord {
 	created_at: number;
 }
 
+// ─── Cowork (orchestrateur autonome) ────────────────────────────────────────
+// Un « task » Cowork = un objectif que l'utilisateur confie. L'orchestrateur le
+// PLANIFIE en un DAG de sous-tâches, passe par un GATE d'approbation humaine pour
+// les sous-tâches conséquentes, EXÉCUTE chacune dans un sandbox Docker jetable,
+// puis SYNTHÉTISE un livrable. Statuts gelés par le contrat partagé.
+export type CoworkTaskStatus =
+	| 'pending'
+	| 'planning'
+	| 'awaiting_approval'
+	| 'running'
+	| 'synthesizing'
+	| 'done'
+	| 'error'
+	| 'killed';
+
+export type CoworkSubtaskStatus =
+	| 'pending'
+	| 'blocked'
+	| 'awaiting_approval'
+	| 'running'
+	| 'done'
+	| 'error'
+	| 'skipped'
+	| 'killed';
+
+export type CoworkRisk = 'safe' | 'mutating' | 'consequential';
+
+export interface CoworkTask {
+	id: string;
+	user_id: string | null;
+	goal: string;
+	status: CoworkTaskStatus;
+	plan_json: string | null;
+	result: string | null;
+	error: string | null;
+	cost_micros: number; // micro-USD cumulés (cap COWORK_MAX_USD_PER_TASK)
+	model: string | null;
+	created_at: number;
+	updated_at: number;
+}
+
+export interface CoworkSubtask {
+	id: string;
+	task_id: string;
+	seq: number;
+	title: string;
+	description: string;
+	risk: CoworkRisk;
+	depends_on: string; // JSON array d'index 0-based (DAG), tel que stocké en base
+	status: CoworkSubtaskStatus;
+	approved: number; // 0 | 1 (le gate humain)
+	container_id: string | null;
+	output: string | null;
+	error: string | null;
+	created_at: number;
+	updated_at: number;
+}
+
 let _db: Database.Database | null = null;
 let _stmts: ReturnType<typeof prepare> | null = null;
 
@@ -189,6 +247,85 @@ function prepare(db: Database.Database) {
 		// ─── usage (Sprint 2 PR-D, schéma posé ici) ──────────────────────────
 		insertUsage: db.prepare(
 			'INSERT INTO usage (id, user_id, conversation_id, model, input_tokens, output_tokens, cost_micros, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+		),
+		// ─── cowork tasks (scoped par user_id pour les lectures côté UI) ─────
+		insertCoworkTask: db.prepare(
+			'INSERT INTO cowork_tasks (id, user_id, goal, status, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+		),
+		getCoworkTask: db.prepare<[string, string], CoworkTask>(
+			'SELECT * FROM cowork_tasks WHERE id = ? AND user_id = ?'
+		),
+		getCoworkTaskById: db.prepare<[string], CoworkTask>(
+			'SELECT * FROM cowork_tasks WHERE id = ?'
+		),
+		listCoworkTasks: db.prepare<[string, number], CoworkTask>(
+			'SELECT * FROM cowork_tasks WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?'
+		),
+		updateCoworkTaskStatus: db.prepare(
+			'UPDATE cowork_tasks SET status = ?, updated_at = ? WHERE id = ?'
+		),
+		updateCoworkTaskStatusFields: db.prepare(
+			`UPDATE cowork_tasks SET status = ?,
+			 plan_json = COALESCE(?, plan_json),
+			 result    = COALESCE(?, result),
+			 error     = COALESCE(?, error),
+			 updated_at = ? WHERE id = ?`
+		),
+		setCoworkTaskPlan: db.prepare(
+			'UPDATE cowork_tasks SET plan_json = ?, updated_at = ? WHERE id = ?'
+		),
+		addCoworkTaskCost: db.prepare(
+			'UPDATE cowork_tasks SET cost_micros = cost_micros + ?, updated_at = ? WHERE id = ?'
+		),
+		// Claim atomique (BEGIN IMMEDIATE côté caller) : la plus vieille tâche
+		// pending → planning. Mirroir de tasks.py claim_next().
+		oldestPendingCoworkTask: db.prepare<[], { id: string }>(
+			"SELECT id FROM cowork_tasks WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"
+		),
+		killCoworkTask: db.prepare(
+			`UPDATE cowork_tasks SET status = 'killed', updated_at = ?
+			 WHERE id = ? AND user_id = ? AND status NOT IN ('done','error','killed')`
+		),
+		// ─── cowork subtasks (héritent du user_id via la task) ───────────────
+		insertCoworkSubtask: db.prepare(
+			'INSERT INTO cowork_subtasks (id, task_id, seq, title, description, risk, depends_on, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+		),
+		listCoworkSubtasks: db.prepare<[string], CoworkSubtask>(
+			'SELECT * FROM cowork_subtasks WHERE task_id = ? ORDER BY seq ASC'
+		),
+		getCoworkSubtask: db.prepare<[string], CoworkSubtask>(
+			'SELECT * FROM cowork_subtasks WHERE id = ?'
+		),
+		updateCoworkSubtaskStatus: db.prepare(
+			`UPDATE cowork_subtasks SET status = ?,
+			 output       = COALESCE(?, output),
+			 error        = COALESCE(?, error),
+			 container_id = COALESCE(?, container_id),
+			 updated_at = ? WHERE id = ?`
+		),
+		// Le gate humain : approuve une sous-tâche conséquente et la sort de
+		// 'awaiting_approval'. Scopé par user via la task parente.
+		approveCoworkSubtask: db.prepare(
+			`UPDATE cowork_subtasks SET approved = 1, status = 'pending', updated_at = ?
+			 WHERE id = ? AND status = 'awaiting_approval'
+			 AND task_id IN (SELECT id FROM cowork_tasks WHERE user_id = ?)`
+		),
+		approveAllCoworkSubtasks: db.prepare(
+			`UPDATE cowork_subtasks SET approved = 1, status = 'pending', updated_at = ?
+			 WHERE task_id = ? AND status = 'awaiting_approval'
+			 AND task_id IN (SELECT id FROM cowork_tasks WHERE user_id = ?)`
+		),
+		// Claim atomique d'une sous-tâche exécutable : pending, gate franchi
+		// (safe OU approved=1), et toutes ses dépendances 'done'. Le calcul du
+		// DAG se fait côté JS (depends_on stocke des index 0-based → on les
+		// résout en ids via le seq) ; ici on ne fait que le pending→running.
+		runnableCoworkSubtasks: db.prepare<[string], CoworkSubtask>(
+			`SELECT * FROM cowork_subtasks WHERE task_id = ? AND status = 'pending'
+			 AND (risk = 'safe' OR approved = 1) ORDER BY seq ASC`
+		),
+		claimCoworkSubtask: db.prepare(
+			`UPDATE cowork_subtasks SET status = 'running', updated_at = ?
+			 WHERE id = ? AND status = 'pending'`
 		)
 	};
 }
@@ -316,6 +453,41 @@ function stmts() {
 			created_at INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_usage_user ON usage(user_id, created_at DESC);
+		-- ─── Cowork (orchestrateur autonome) ─────────────────────────────────
+		CREATE TABLE IF NOT EXISTS cowork_tasks (
+			id           TEXT PRIMARY KEY,
+			user_id      TEXT REFERENCES users(id) ON DELETE SET NULL,
+			goal         TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','planning','awaiting_approval','running','synthesizing','done','error','killed')),
+			plan_json    TEXT,
+			result       TEXT,
+			error        TEXT,
+			cost_micros  INTEGER NOT NULL DEFAULT 0,
+			model        TEXT,
+			created_at   INTEGER NOT NULL,
+			updated_at   INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_cowork_tasks_user ON cowork_tasks(user_id, updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_cowork_tasks_status ON cowork_tasks(status, created_at);
+
+		CREATE TABLE IF NOT EXISTS cowork_subtasks (
+			id           TEXT PRIMARY KEY,
+			task_id      TEXT NOT NULL REFERENCES cowork_tasks(id) ON DELETE CASCADE,
+			seq          INTEGER NOT NULL,
+			title        TEXT NOT NULL,
+			description  TEXT NOT NULL,
+			risk         TEXT NOT NULL DEFAULT 'safe' CHECK (risk IN ('safe','mutating','consequential')),
+			depends_on   TEXT NOT NULL DEFAULT '[]',
+			status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','blocked','awaiting_approval','running','done','error','skipped','killed')),
+			approved     INTEGER NOT NULL DEFAULT 0,
+			container_id TEXT,
+			output       TEXT,
+			error        TEXT,
+			created_at   INTEGER NOT NULL,
+			updated_at   INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_cowork_subtasks_task ON cowork_subtasks(task_id, seq);
+		CREATE INDEX IF NOT EXISTS idx_cowork_subtasks_status ON cowork_subtasks(status, created_at);
 	`);
 	migrate(_db);
 	_stmts = prepare(_db);
@@ -581,4 +753,198 @@ export function recordUsage(rec: {
 		rec.cost_micros,
 		Date.now()
 	);
+}
+
+// ─── cowork tasks ────────────────────────────────────────────────────────────
+
+export function createCoworkTask(
+	userId: string,
+	goal: string,
+	model?: string | null
+): CoworkTask {
+	const id = randomUUID();
+	const now = Date.now();
+	const g = goal.trim();
+	const m = model ?? null;
+	stmts().insertCoworkTask.run(id, userId, g, 'pending', m, now, now);
+	return {
+		id,
+		user_id: userId,
+		goal: g,
+		status: 'pending',
+		plan_json: null,
+		result: null,
+		error: null,
+		cost_micros: 0,
+		model: m,
+		created_at: now,
+		updated_at: now
+	};
+}
+
+export function getCoworkTask(id: string, userId: string): CoworkTask | undefined {
+	return stmts().getCoworkTask.get(id, userId);
+}
+
+// Lecture non scopée — réservée à l'orchestrateur (daemon, pas de session HTTP).
+export function getCoworkTaskById(id: string): CoworkTask | undefined {
+	return stmts().getCoworkTaskById.get(id);
+}
+
+export function listCoworkTasks(userId: string, limit = 50): CoworkTask[] {
+	return stmts().listCoworkTasks.all(userId, Math.max(1, Math.min(200, limit)));
+}
+
+export function updateCoworkTaskStatus(
+	id: string,
+	status: CoworkTaskStatus,
+	fields?: { plan_json?: string | null; result?: string | null; error?: string | null }
+): void {
+	const now = Date.now();
+	if (fields && (fields.plan_json !== undefined || fields.result !== undefined || fields.error !== undefined)) {
+		// COALESCE : un champ omis (undefined → null) ne touche pas l'existant.
+		stmts().updateCoworkTaskStatusFields.run(
+			status,
+			fields.plan_json ?? null,
+			fields.result ?? null,
+			fields.error ?? null,
+			now,
+			id
+		);
+		return;
+	}
+	stmts().updateCoworkTaskStatus.run(status, now, id);
+}
+
+export function setCoworkTaskPlan(id: string, planJson: string): void {
+	stmts().setCoworkTaskPlan.run(planJson, Date.now(), id);
+}
+
+export function addCoworkTaskCost(id: string, costMicros: number): void {
+	stmts().addCoworkTaskCost.run(Math.max(0, Math.round(costMicros)), Date.now(), id);
+}
+
+// Claim atomique de la plus vieille tâche pending → planning (mirroir de
+// tasks.py claim_next : BEGIN IMMEDIATE pour qu'aucun double daemon ne la prenne
+// deux fois). Réservé à l'orchestrateur.
+export function claimNextCoworkTask(): CoworkTask | undefined {
+	const db = _dbHandle();
+	const claim = db.transaction((): string | null => {
+		const row = stmts().oldestPendingCoworkTask.get();
+		if (!row) return null;
+		stmts().updateCoworkTaskStatus.run('planning', Date.now(), row.id);
+		return row.id;
+	});
+	// better-sqlite3 : `immediate` = BEGIN IMMEDIATE (verrou d'écriture pris d'emblée).
+	const id = (claim as unknown as { immediate: () => string | null }).immediate();
+	return id ? stmts().getCoworkTaskById.get(id) : undefined;
+}
+
+// Kill-switch : marque la task killed si elle n'est pas déjà terminée. L'orchestrateur
+// détecte la transition au poll suivant et docker-kill les conteneurs en cours.
+export function killCoworkTask(id: string, userId: string): boolean {
+	return stmts().killCoworkTask.run(Date.now(), id, userId).changes > 0;
+}
+
+// ─── cowork subtasks ─────────────────────────────────────────────────────────
+
+export function insertCoworkSubtask(
+	taskId: string,
+	seq: number,
+	title: string,
+	description: string,
+	risk: CoworkRisk,
+	dependsOn: string[]
+): CoworkSubtask {
+	const id = randomUUID();
+	const now = Date.now();
+	const deps = JSON.stringify(dependsOn ?? []);
+	stmts().insertCoworkSubtask.run(id, taskId, seq, title, description, risk, deps, now, now);
+	return {
+		id,
+		task_id: taskId,
+		seq,
+		title,
+		description,
+		risk,
+		depends_on: deps,
+		status: 'pending',
+		approved: 0,
+		container_id: null,
+		output: null,
+		error: null,
+		created_at: now,
+		updated_at: now
+	};
+}
+
+export function listCoworkSubtasks(taskId: string): CoworkSubtask[] {
+	return stmts().listCoworkSubtasks.all(taskId);
+}
+
+export function getCoworkSubtask(id: string): CoworkSubtask | undefined {
+	return stmts().getCoworkSubtask.get(id);
+}
+
+export function updateCoworkSubtaskStatus(
+	id: string,
+	status: CoworkSubtaskStatus,
+	fields?: { output?: string | null; error?: string | null; container_id?: string | null }
+): void {
+	stmts().updateCoworkSubtaskStatus.run(
+		status,
+		fields?.output ?? null,
+		fields?.error ?? null,
+		fields?.container_id ?? null,
+		Date.now(),
+		id
+	);
+}
+
+// Le gate humain : approuve UNE sous-tâche conséquente (la remet en 'pending' pour
+// que l'orchestrateur la reprenne). Retourne true si elle a bien été sortie du gate.
+export function approveCoworkSubtask(id: string, userId: string): boolean {
+	return stmts().approveCoworkSubtask.run(Date.now(), id, userId).changes > 0;
+}
+
+// Approuve TOUTES les sous-tâches en attente d'une task. Retourne le nombre sorti
+// du gate (0 si aucune n'attendait ou si la task n'appartient pas au user).
+export function approveAllCoworkSubtasks(taskId: string, userId: string): number {
+	return stmts().approveAllCoworkSubtasks.run(Date.now(), taskId, userId).changes;
+}
+
+// Claim atomique d'une sous-tâche exécutable : dépendances toutes 'done', gate
+// franchi (safe OU approved=1), puis pending→running. Le DAG (depends_on stocke
+// des index 0-based, résolus via seq) est vérifié en JS sous le verrou d'écriture
+// pour qu'aucune exécution concurrente ne double-claim (mirroir claim_next).
+export function claimRunnableCoworkSubtask(taskId: string): CoworkSubtask | undefined {
+	const db = _dbHandle();
+	const claim = db.transaction((): string | null => {
+		const all = stmts().listCoworkSubtasks.all(taskId);
+		const doneSeqs = new Set(all.filter((s) => s.status === 'done').map((s) => s.seq));
+		const candidates = stmts().runnableCoworkSubtasks.all(taskId);
+		for (const st of candidates) {
+			let deps: number[] = [];
+			try {
+				deps = JSON.parse(st.depends_on) as number[];
+			} catch {
+				deps = [];
+			}
+			if (deps.every((d) => doneSeqs.has(d))) {
+				stmts().claimCoworkSubtask.run(Date.now(), st.id);
+				return st.id;
+			}
+		}
+		return null;
+	});
+	const id = (claim as unknown as { immediate: () => string | null }).immediate();
+	return id ? stmts().getCoworkSubtask.get(id) : undefined;
+}
+
+// Accès direct au handle DB pour les transactions atomiques cowork (claim).
+// stmts() garantit que _db est initialisé (migration + prepare jouées).
+function _dbHandle(): Database.Database {
+	stmts();
+	if (!_db) throw new Error('DB non initialisée');
+	return _db;
 }

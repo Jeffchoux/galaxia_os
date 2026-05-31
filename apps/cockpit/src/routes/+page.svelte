@@ -106,11 +106,17 @@
 	// Firefox et est partiel sur Safari. Whisper local marche partout via getUserMedia.
 	let sttBackend = $state<'browser' | 'whisper'>('whisper');
 
-	// Modèle du chat (choix Jeff 2026-05-29) :
-	// - 'free' (défaut) : LLM gratuit (Groq), chat nu, pour les petites tâches.
-	// - 'pro'  : Opus 4.8 + outils, pour coder/améliorer Galaxia + la com de Jeff.
+	// Modèle du chat :
+	// - 'auto' (défaut) : routeur souverain — Galaxia choisit seule free vs Opus
+	//   selon la nature de la demande (gratuit par défaut, Opus seulement si
+	//   tâche technique/rédaction ou pièce jointe). La décision s'affiche.
+	// - 'free' : force le LLM gratuit (Groq), accès LECTURE au projet.
+	// - 'pro'  : force Opus 4.8 + outils, pour coder/améliorer Galaxia + la com.
 	// Persisté en localStorage : le dernier choix est conservé entre sessions.
-	let chatMode = $state<'pro' | 'free'>('free');
+	let chatMode = $state<'pro' | 'free' | 'auto'>('auto');
+	// Dernière décision du routeur (mode auto) — affichée pour rester transparent
+	// sur le moteur retenu et son coût. Réinitialisée à chaque nouvel envoi.
+	let routeNote = $state<{ engine: 'free' | 'pro'; reason: string } | null>(null);
 
 	// ─── Projets (WS3) — regroupement des conversations façon Claude Code ───
 	type Project = { id: string; name: string };
@@ -189,6 +195,76 @@
 	let codeWrap = $state(false);
 	let codeCopied = $state(false);
 
+	// ─── Cowork (orchestrateur autonome) ─────────────────────────────────────
+	// Mode « Cowork » : on confie un OBJECTIF, l'orchestrateur le décompose en un
+	// DAG de sous-tâches (PLAN), passe par un GATE d'approbation humaine pour les
+	// sous-tâches conséquentes, EXÉCUTE chacune dans un sandbox Docker jetable, puis
+	// SYNTHÉTISE un livrable. Suivi temps réel via le SSE /api/cowork/[id]/stream
+	// (même parsing event:/data: que le chat). Le livrable final s'affiche dans le
+	// panneau Arfa (onglet Doc). Cf. contrat figé.
+	type CoworkRisk = 'safe' | 'mutating' | 'consequential';
+	type CoworkTaskStatus =
+		| 'pending'
+		| 'planning'
+		| 'awaiting_approval'
+		| 'running'
+		| 'synthesizing'
+		| 'done'
+		| 'error'
+		| 'killed';
+	type CoworkSubtaskStatus =
+		| 'pending'
+		| 'blocked'
+		| 'awaiting_approval'
+		| 'running'
+		| 'done'
+		| 'error'
+		| 'skipped'
+		| 'killed';
+	type CoworkTaskRow = {
+		id: string;
+		goal: string;
+		status: CoworkTaskStatus;
+		cost_micros: number;
+		created_at: number;
+		updated_at: number;
+	};
+	type CoworkSubtaskRow = {
+		id: string;
+		seq: number;
+		title: string;
+		description: string;
+		risk: CoworkRisk;
+		depends_on: number[];
+		status: CoworkSubtaskStatus;
+		approved: boolean;
+		output?: string;
+		error?: string;
+	};
+	type CoworkLogLine = { subtask_id: string; line: string; stream: 'stdout' | 'stderr'; ts: number };
+
+	let coworkOpen = $state(false);
+	let coworkTasks = $state<CoworkTaskRow[]>([]);
+	let coworkActive = $state<CoworkTaskRow | null>(null);
+	let coworkSubtasks = $state<CoworkSubtaskRow[]>([]);
+	let coworkLogs = $state<CoworkLogLine[]>([]);
+	let coworkGoal = $state('');
+	let coworkLoading = $state(false);
+	let coworkError = $state<string | null>(null);
+	let coworkSubmitting = $state(false);
+	let coworkStream: { close: () => void } | null = null;
+	// Borne le tampon de logs affiché pour ne pas faire enfler le DOM indéfiniment.
+	const COWORK_LOG_MAX = 500;
+
+	// Sous-tâches en attente du feu vert humain (porte d'approbation).
+	const coworkGated = $derived(
+		coworkSubtasks.filter((s) => s.status === 'awaiting_approval' && !s.approved)
+	);
+	// Tâche en cours d'exécution (le kill-switch n'a de sens que hors état terminal).
+	const coworkTerminal = $derived(
+		!!coworkActive && ['done', 'error', 'killed'].includes(coworkActive.status)
+	);
+
 	// Aplati les fichiers de l'arbre pour la recherche (la recherche bascule d'une
 	// vue arborescente vers une liste plate des chemins qui matchent).
 	function flattenFiles(nodes: CodeNode[], acc: CodeNode[] = []): CodeNode[] {
@@ -232,7 +308,7 @@
 			const sb = localStorage.getItem('galaxia.sttBackend');
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 			const cm = localStorage.getItem('galaxia.chatMode');
-			if (cm === 'pro' || cm === 'free') chatMode = cm;
+			if (cm === 'pro' || cm === 'free' || cm === 'auto') chatMode = cm;
 			codeWrap = localStorage.getItem('galaxia.codeWrap') === '1';
 			const cp = localStorage.getItem('galaxia.collapsedProjects');
 			if (cp) collapsedProjects = new Set(JSON.parse(cp) as string[]);
@@ -785,6 +861,7 @@
 		if (!text || sending) return;
 		draft = '';
 		errorMsg = null;
+		routeNote = null;
 		sending = true;
 		stopSpeaking(); // au cas où Galaxia parlait encore d'avant
 		ttsBuffer = '';
@@ -862,6 +939,8 @@
 			input?: Record<string, unknown>;
 			result?: string;
 			is_error?: boolean;
+			engine?: 'free' | 'pro';
+			reason?: string;
 		};
 		try {
 			data = JSON.parse(dataStr);
@@ -872,6 +951,10 @@
 		if (event === 'conversation' && data.id) {
 			conversationId = data.id;
 			history.replaceState({}, '', `/?c=${data.id}`);
+		} else if (event === 'routing' && data.engine) {
+			// Décision du routeur souverain (mode auto) : on l'affiche pour rester
+			// transparent sur le moteur retenu (et donc le coût) du tour courant.
+			routeNote = { engine: data.engine, reason: data.reason ?? '' };
 		} else if (event === 'delta' && data.text && streamingIndex !== null) {
 			const t = turns[streamingIndex];
 			turns[streamingIndex] = {
@@ -1026,6 +1109,8 @@
 
 	function closePreview() {
 		previewDoc = null;
+		coworkDeliverableOpen = false;
+		docInline = null;
 		if (codeOpen) arfaTab = 'code';
 	}
 
@@ -1170,6 +1255,318 @@
 		return Array.from({ length: n }, (_, i) => i + 1).join('\n');
 	}
 
+	// ─── Cowork (orchestrateur autonome) ─────────────────────────────────────
+	function openCowork() {
+		coworkOpen = true;
+		codeOpen = false; // Code et Cowork sont deux vues exclusives du main
+		if (coworkTasks.length === 0) loadCoworkTasks();
+	}
+	function closeCowork() {
+		coworkOpen = false;
+		stopCoworkStream();
+	}
+
+	async function loadCoworkTasks() {
+		coworkLoading = true;
+		coworkError = null;
+		try {
+			const res = await fetch('/api/cowork');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const body = await res.json();
+			coworkTasks = body.tasks ?? [];
+		} catch (e) {
+			coworkError = e instanceof Error ? e.message : String(e);
+		} finally {
+			coworkLoading = false;
+		}
+	}
+
+	async function submitCoworkGoal(e?: Event) {
+		e?.preventDefault();
+		const goal = coworkGoal.trim();
+		if (!goal || coworkSubmitting) return;
+		coworkSubmitting = true;
+		coworkError = null;
+		try {
+			const res = await fetch('/api/cowork', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ goal })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const { task } = await res.json();
+			coworkGoal = '';
+			coworkTasks = [task, ...coworkTasks.filter((t) => t.id !== task.id)];
+			openCoworkTask(task);
+		} catch (err) {
+			coworkError = err instanceof Error ? err.message : String(err);
+		} finally {
+			coworkSubmitting = false;
+		}
+	}
+
+	// Ouvre une tâche : charge l'instantané REST puis branche le SSE temps réel.
+	async function openCoworkTask(task: CoworkTaskRow) {
+		stopCoworkStream();
+		coworkActive = task;
+		coworkSubtasks = [];
+		coworkLogs = [];
+		coworkError = null;
+		// fermer le livrable d'une éventuelle tâche précédente
+		if (coworkDeliverableOpen) closePreview();
+		try {
+			const res = await fetch(`/api/cowork/${task.id}`);
+			if (res.ok) {
+				const body = await res.json();
+				coworkActive = body.task;
+				coworkSubtasks = (body.subtasks ?? []).map(normalizeSubtaskRow);
+			}
+		} catch {
+			/* l'instantané SSE rattrapera */
+		}
+		startCoworkStream(task.id);
+	}
+
+	// La route /api/cowork/[id] renvoie les sous-tâches brutes (depends_on en JSON
+	// string, approved en 0|1) ; on normalise vers la forme utilisée par l'UI, qui
+	// est aussi celle des frames SSE 'plan'.
+	function normalizeSubtaskRow(s: {
+		id: string;
+		seq: number;
+		title: string;
+		description: string;
+		risk: CoworkRisk;
+		depends_on: string | number[];
+		status: CoworkSubtaskStatus;
+		approved: number | boolean;
+		output?: string | null;
+		error?: string | null;
+	}): CoworkSubtaskRow {
+		let dep: number[] = [];
+		if (Array.isArray(s.depends_on)) dep = s.depends_on;
+		else {
+			try {
+				const p = JSON.parse(s.depends_on);
+				if (Array.isArray(p)) dep = p.filter((n) => typeof n === 'number');
+			} catch {
+				/* [] */
+			}
+		}
+		return {
+			id: s.id,
+			seq: s.seq,
+			title: s.title,
+			description: s.description,
+			risk: s.risk,
+			depends_on: dep,
+			status: s.status,
+			approved: s.approved === 1 || s.approved === true,
+			output: s.output ?? undefined,
+			error: s.error ?? undefined
+		};
+	}
+
+	function startCoworkStream(taskId: string) {
+		if (typeof window === 'undefined') return;
+		const ctrl = new AbortController();
+		coworkStream = { close: () => ctrl.abort() };
+		(async () => {
+			try {
+				const res = await fetch(`/api/cowork/${taskId}/stream`, { signal: ctrl.signal });
+				if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+				const reader = res.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+				while (true) {
+					const { value, done } = await reader.read();
+					if (done) break;
+					buffer += decoder.decode(value, { stream: true });
+					let sep;
+					while ((sep = buffer.indexOf('\n\n')) !== -1) {
+						const frame = buffer.slice(0, sep);
+						buffer = buffer.slice(sep + 2);
+						handleCoworkFrame(taskId, frame);
+					}
+				}
+			} catch (err) {
+				if (!(err instanceof DOMException && err.name === 'AbortError')) {
+					coworkError = err instanceof Error ? err.message : String(err);
+				}
+			}
+		})();
+	}
+
+	function stopCoworkStream() {
+		coworkStream?.close();
+		coworkStream = null;
+	}
+
+	// Parsing event:/data: identique à handleFrame (chat). Met à jour la tâche, le
+	// plan (DAG), les transitions de sous-tâches et accumule les logs du sandbox.
+	function handleCoworkFrame(taskId: string, frame: string) {
+		const lines = frame.split('\n');
+		let event = 'message';
+		let dataStr = '';
+		for (const line of lines) {
+			if (line.startsWith('event: ')) event = line.slice(7);
+			else if (line.startsWith('data: ')) dataStr += line.slice(6);
+		}
+		if (!dataStr) return;
+		// Ignore les frames d'un stream obsolète (l'utilisateur a changé de tâche).
+		if (!coworkActive || coworkActive.id !== taskId) return;
+		let data: any;
+		try {
+			data = JSON.parse(dataStr);
+		} catch {
+			return;
+		}
+
+		if (event === 'task') {
+			coworkActive = { ...coworkActive, ...data };
+			// Reflète la transition dans la liste de gauche.
+			coworkTasks = coworkTasks.map((t) =>
+				t.id === data.id ? { ...t, ...data } : t
+			);
+		} else if (event === 'plan' && Array.isArray(data.subtasks)) {
+			coworkSubtasks = data.subtasks.map(normalizeSubtaskRow);
+		} else if (event === 'subtask' && data.id) {
+			coworkSubtasks = coworkSubtasks.map((s) =>
+				s.id === data.id
+					? {
+							...s,
+							status: data.status ?? s.status,
+							risk: data.risk ?? s.risk,
+							output: data.output ?? s.output,
+							error: data.error ?? s.error
+						}
+					: s
+			);
+		} else if (event === 'log' && data.line !== undefined) {
+			const next = [
+				...coworkLogs,
+				{
+					subtask_id: data.subtask_id,
+					line: data.line,
+					stream: data.stream === 'stderr' ? 'stderr' : 'stdout',
+					ts: data.ts ?? Date.now()
+				} as CoworkLogLine
+			];
+			coworkLogs = next.length > COWORK_LOG_MAX ? next.slice(-COWORK_LOG_MAX) : next;
+		} else if (event === 'done') {
+			coworkActive = { ...coworkActive, status: 'done' };
+			if (typeof data.result === 'string' && data.result) {
+				showCoworkDeliverable(data.result);
+			}
+			stopCoworkStream();
+		} else if (event === 'error') {
+			coworkError = data.message ?? 'Erreur Cowork';
+			if (!data.subtask_id) {
+				coworkActive = { ...coworkActive, status: 'error' };
+				stopCoworkStream();
+			}
+		}
+	}
+
+	function approveCowork(subtaskId?: string) {
+		if (!coworkActive) return;
+		const taskId = coworkActive.id;
+		fetch(`/api/cowork/${taskId}/approve`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(subtaskId ? { subtask_id: subtaskId } : {})
+		})
+			.then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+			.then(() => {
+				// Optimiste : on marque approuvé localement ; le SSE confirmera.
+				coworkSubtasks = coworkSubtasks.map((s) =>
+					!subtaskId || s.id === subtaskId ? { ...s, approved: true } : s
+				);
+			})
+			.catch((e) => {
+				coworkError = e instanceof Error ? e.message : String(e);
+			});
+	}
+
+	function killCowork() {
+		if (!coworkActive || coworkTerminal) return;
+		if (!window.confirm('Interrompre cette tâche ? Les sandbox en cours seront tués.')) return;
+		const taskId = coworkActive.id;
+		fetch(`/api/cowork/${taskId}/kill`, { method: 'POST' })
+			.then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+			.then(() => {
+				if (coworkActive && coworkActive.id === taskId) {
+					coworkActive = { ...coworkActive, status: 'killed' };
+				}
+			})
+			.catch((e) => {
+				coworkError = e instanceof Error ? e.message : String(e);
+			});
+	}
+
+	// Affiche le livrable final dans le panneau Arfa (onglet Doc), comme un document
+	// markdown. On réutilise la machinerie d'aperçu existante via un DocChip virtuel.
+	let coworkDeliverableOpen = $state(false);
+	function showCoworkDeliverable(result: string) {
+		coworkDeliverableOpen = true;
+		previewDoc = {
+			id: '__cowork__',
+			filename: 'Livrable Cowork.md',
+			mime_type: 'text/markdown',
+			size: result.length
+		};
+		arfaTab = 'doc';
+		// On court-circuite loadDocInline (pas d'appel réseau) : on injecte le contenu
+		// directement (rendu texte ; pas de {@html} pour rester sûr sans assainisseur côté client).
+		docInline = { content: result, filename: 'Livrable Cowork.md' };
+		docInlineLoading = false;
+	}
+
+	// Recharge le livrable d'une tâche terminée (le champ result vit dans le détail
+	// REST, pas dans la ligne de liste) et l'affiche dans le panneau Arfa.
+	async function reopenCoworkDeliverable() {
+		if (!coworkActive) return;
+		try {
+			const res = await fetch(`/api/cowork/${coworkActive.id}`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const body = await res.json();
+			if (body.task?.result) showCoworkDeliverable(body.task.result);
+		} catch (e) {
+			coworkError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function coworkStatusLabel(s: CoworkTaskStatus): string {
+		return (
+			{
+				pending: 'en file',
+				planning: 'planification…',
+				awaiting_approval: 'approbation requise',
+				running: 'exécution…',
+				synthesizing: 'synthèse…',
+				done: 'terminé',
+				error: 'échec',
+				killed: 'interrompu'
+			} as Record<CoworkTaskStatus, string>
+		)[s] ?? s;
+	}
+	function coworkSubLabel(s: CoworkSubtaskStatus): string {
+		return (
+			{
+				pending: 'en attente',
+				blocked: 'bloqué',
+				awaiting_approval: 'à approuver',
+				running: 'en cours',
+				done: 'fait',
+				error: 'échec',
+				skipped: 'ignoré',
+				killed: 'tué'
+			} as Record<CoworkSubtaskStatus, string>
+		)[s] ?? s;
+	}
+	function coworkRiskLabel(r: CoworkRisk): string {
+		return ({ safe: 'sûr', mutating: 'modifie', consequential: 'conséquent' } as Record<CoworkRisk, string>)[r] ?? r;
+	}
+
 	// ─── Rendu inline du document dans l'onglet Doc ──────────────────────────
 	// Seuls les binaires (PDF, images) passent encore par l'iframe native.
 	// Markdown → HTML assaini côté serveur (renderMarkdownSafe, cf.
@@ -1244,22 +1641,31 @@
 		<div class="shell-modes" role="tablist" aria-label="Mode de travail">
 			<button
 				class="shell-mode"
-				class:active={!codeOpen}
+				class:active={!codeOpen && !coworkOpen}
 				role="tab"
-				aria-selected={!codeOpen}
-				onclick={closeCode}
+				aria-selected={!codeOpen && !coworkOpen}
+				onclick={() => {
+					closeCowork();
+					closeCode();
+				}}
 			>💬 Chat</button>
 			<button
 				class="shell-mode"
-				class:active={codeOpen}
+				class:active={codeOpen && !coworkOpen}
 				role="tab"
-				aria-selected={codeOpen}
-				onclick={openCode}
+				aria-selected={codeOpen && !coworkOpen}
+				onclick={() => {
+					closeCowork();
+					openCode();
+				}}
 			>&lt;/&gt; Code</button>
 			<button
-				class="shell-mode disabled"
-				disabled
-				title="Cowork (assistance live sur ton écran) — bientôt"
+				class="shell-mode"
+				class:active={coworkOpen}
+				role="tab"
+				aria-selected={coworkOpen}
+				onclick={openCowork}
+				title="Cowork — confie un objectif, l'orchestrateur planifie, exécute en sandbox et synthétise"
 			>🤝 Cowork</button>
 		</div>
 		<div class="new-row">
@@ -1364,6 +1770,153 @@
 		</form>
 	</aside>
 
+	{#if coworkOpen}
+		<main class="main cowork-main">
+			<header>
+				<div class="head-title">
+					<h1>🤝 Cowork</h1>
+				</div>
+				<div class="header-actions">
+					{#if coworkActive && !coworkTerminal}
+						<button class="stop-speak" onclick={killCowork} title="Interrompre la tâche (kill-switch)">
+							⏹ Arrêter
+						</button>
+					{/if}
+				</div>
+			</header>
+
+			<section class="cowork-body">
+				<!-- Composer d'objectif -->
+				<form class="cowork-goal" onsubmit={submitCoworkGoal}>
+					<textarea
+						bind:value={coworkGoal}
+						placeholder="Décris l'objectif à atteindre. L'orchestrateur le décompose, exécute chaque étape en sandbox isolé, et te demande ton feu vert pour tout ce qui est conséquent."
+						rows="2"
+						disabled={coworkSubmitting}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								submitCoworkGoal();
+							}
+						}}
+					></textarea>
+					<button type="submit" disabled={coworkSubmitting || !coworkGoal.trim()}>
+						{coworkSubmitting ? '…' : 'Lancer'}
+					</button>
+				</form>
+
+				{#if coworkError}
+					<div class="error">⚠ {coworkError}</div>
+				{/if}
+
+				<div class="cowork-split">
+					<!-- Liste des tâches -->
+					<aside class="cowork-tasklist">
+						<div class="cowork-tasklist-head">
+							<span>Tâches</span>
+							<button class="cowork-refresh" onclick={loadCoworkTasks} title="Rafraîchir">⟳</button>
+						</div>
+						{#if coworkLoading && coworkTasks.length === 0}
+							<p class="empty sub">Chargement…</p>
+						{:else if coworkTasks.length === 0}
+							<p class="empty sub">Aucune tâche. Lance ton premier objectif ci-dessus.</p>
+						{/if}
+						{#each coworkTasks as t (t.id)}
+							<button
+								class="cowork-task-row"
+								class:active={coworkActive?.id === t.id}
+								onclick={() => openCoworkTask(t)}
+							>
+								<span class="cowork-task-goal">{t.goal}</span>
+								<span class="cowork-badge st-{t.status}">{coworkStatusLabel(t.status)}</span>
+							</button>
+						{/each}
+					</aside>
+
+					<!-- Détail tâche : plan (DAG) + progression -->
+					<div class="cowork-detail">
+						{#if !coworkActive}
+							<div class="welcome"><p>Sélectionne une tâche ou lance un objectif.</p></div>
+						{:else}
+							<div class="cowork-detail-head">
+								<h2>{coworkActive.goal}</h2>
+								<div class="cowork-detail-meta">
+									<span class="cowork-badge st-{coworkActive.status}">
+										{coworkStatusLabel(coworkActive.status)}
+									</span>
+									<span class="cowork-cost">
+										{(coworkActive.cost_micros / 1_000_000).toFixed(3)} $
+									</span>
+								</div>
+							</div>
+
+							{#if coworkGated.length > 0}
+								<div class="cowork-gate">
+									<div class="cowork-gate-head">
+										⚠ {coworkGated.length} sous-tâche{coworkGated.length > 1 ? 's' : ''} conséquente{coworkGated.length > 1 ? 's' : ''}
+										en attente de ton approbation.
+									</div>
+									<button class="cowork-approve-all" onclick={() => approveCowork()}>
+										✓ Tout approuver
+									</button>
+								</div>
+							{/if}
+
+							<ol class="cowork-dag">
+								{#each coworkSubtasks as st (st.id)}
+									<li class="cowork-node" class:done={st.status === 'done'} class:running={st.status === 'running'} class:failed={st.status === 'error'}>
+										<div class="cowork-node-head">
+											<span class="cowork-seq">{st.seq + 1}</span>
+											<span class="cowork-node-title">{st.title}</span>
+											<span class="cowork-risk risk-{st.risk}">{coworkRiskLabel(st.risk)}</span>
+											<span class="cowork-badge sub-{st.status}">{coworkSubLabel(st.status)}</span>
+										</div>
+										<p class="cowork-node-desc">{st.description}</p>
+										{#if st.depends_on.length > 0}
+											<p class="cowork-node-deps">dépend de : {st.depends_on.map((d) => `#${d + 1}`).join(', ')}</p>
+										{/if}
+										{#if st.status === 'awaiting_approval' && !st.approved}
+											<button class="cowork-approve" onclick={() => approveCowork(st.id)}>
+												✓ Approuver cette étape
+											</button>
+										{/if}
+										{#if st.error}
+											<p class="cowork-node-err">⚠ {st.error}</p>
+										{:else if st.output}
+											<p class="cowork-node-out">{st.output}</p>
+										{/if}
+									</li>
+								{/each}
+								{#if coworkSubtasks.length === 0}
+									<p class="empty sub">
+										{coworkActive.status === 'planning'
+											? 'Planification en cours…'
+											: coworkActive.status === 'pending'
+												? 'En file — l\'orchestrateur va prendre la tâche.'
+												: 'Pas encore de plan.'}
+									</p>
+								{/if}
+							</ol>
+
+							{#if coworkLogs.length > 0}
+								<div class="cowork-logs">
+									<div class="cowork-logs-head">Journal sandbox</div>
+									<pre class="cowork-logs-pre">{#each coworkLogs as l (l.ts + l.line)}<span class="cowork-log-line" class:err={l.stream === 'stderr'}>{l.line}
+</span>{/each}</pre>
+								</div>
+							{/if}
+
+							{#if coworkActive.status === 'done'}
+								<button class="cowork-deliverable-btn" onclick={reopenCoworkDeliverable} title="Afficher le livrable dans le panneau de droite">
+									📄 Voir le livrable →
+								</button>
+							{/if}
+						{/if}
+					</div>
+				</div>
+			</section>
+		</main>
+	{:else}
 	<main class="main">
 		<header>
 			<div class="head-title">
@@ -1572,6 +2125,13 @@
 			{/if}
 		</section>
 
+		{#if chatMode === 'auto' && routeNote}
+			<div class="route-note" class:pro={routeNote.engine === 'pro'}>
+				✨ Auto → {routeNote.engine === 'pro' ? '🧠 Opus' : '⚡ Rapide'}
+				<span class="rn-reason">· {routeNote.reason}</span>
+			</div>
+		{/if}
+
 		<div
 			class="composer-wrap"
 			class:drag={dragOver}
@@ -1676,10 +2236,27 @@
 						disabled={sending}
 						aria-haspopup="menu"
 						aria-expanded={modelOpen}
-						title="Choisir le modèle : Rapide (gratuit, accès lecture au projet) ou Opus 4.8 (complet, peut coder)"
-					>{chatMode === 'pro' ? '🧠 Opus' : '⚡ Rapide'}</button>
+						title="Choisir le modèle : Auto (Galaxia décide), Rapide (gratuit, lecture) ou Opus 4.8 (complet, peut coder)"
+					>{chatMode === 'pro' ? '🧠 Opus' : chatMode === 'free' ? '⚡ Rapide' : '✨ Auto'}</button>
 					{#if modelOpen}
 						<div class="menu" role="menu">
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitemradio"
+								aria-checked={chatMode === 'auto'}
+								onclick={() => {
+									chatMode = 'auto';
+									modelOpen = false;
+								}}
+							>
+								<span class="mi-ico">✨</span>
+								<span class="mi-body">
+									<span class="mi-title">Auto — Galaxia décide</span>
+									<span class="mi-sub">Gratuit par défaut, Opus seulement si la tâche le justifie (code, rédaction, pièce jointe).</span>
+								</span>
+								{#if chatMode === 'auto'}<span class="mi-check">✓</span>{/if}
+							</button>
 							<button
 								type="button"
 								class="menu-item"
@@ -1816,6 +2393,7 @@
 			{/if}
 		</div>
 	</main>
+	{/if}
 
 	{#if previewDoc || codeOpen}
 		<aside class="arfa" aria-label="Panneau artefacts et code">
@@ -1831,13 +2409,15 @@
 				<span class="arfa-spacer"></span>
 				{#if arfaTab === 'doc' && previewDoc}
 					<span class="arfa-meta">{fmtBytes(previewDoc.size)}</span>
-					<a
-						class="arfa-dl"
-						href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
-						target="_blank"
-						rel="noopener"
-						title="Ouvrir dans un nouvel onglet">↗</a
-					>
+					{#if previewDoc.id !== '__cowork__'}
+						<a
+							class="arfa-dl"
+							href={`/api/documents/${previewDoc.id}?conversation_id=${conversationId}`}
+							target="_blank"
+							rel="noopener"
+							title="Ouvrir dans un nouvel onglet">↗</a
+						>
+					{/if}
 					<button class="arfa-close" onclick={closePreview} aria-label="Fermer le document">×</button>
 				{:else}
 					<button class="arfa-dl" onclick={refreshCode} title="Rafraîchir depuis le disque">⟳</button>
@@ -2093,6 +2673,336 @@
 	.shell-mode.disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
+	}
+
+	/* — Cowork (orchestrateur autonome) — réutilise le thème terracotta — */
+	.cowork-main {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+	}
+	.cowork-body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		padding: 1rem 1.25rem;
+		overflow: hidden;
+		flex: 1;
+		min-height: 0;
+	}
+	.cowork-goal {
+		display: flex;
+		gap: 0.5rem;
+		align-items: flex-end;
+	}
+	.cowork-goal textarea {
+		flex: 1;
+		resize: vertical;
+		min-height: 2.4rem;
+		padding: 0.6rem 0.75rem;
+		border: 1px solid var(--g-border);
+		border-radius: var(--g-radius);
+		background: var(--g-surface-raised);
+		color: var(--g-fg);
+		font-family: var(--g-font);
+		font-size: 0.92rem;
+		box-shadow: var(--g-shadow-input);
+	}
+	.cowork-goal button[type='submit'] {
+		padding: 0.6rem 1.1rem;
+		background: var(--g-primary);
+		color: #fff;
+		border: none;
+		border-radius: var(--g-radius);
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.cowork-goal button[type='submit']:hover:not(:disabled) {
+		background: var(--g-primary-hover);
+	}
+	.cowork-goal button[type='submit']:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.cowork-split {
+		display: grid;
+		grid-template-columns: 240px 1fr;
+		gap: 1rem;
+		flex: 1;
+		min-height: 0;
+	}
+	.cowork-tasklist {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		overflow-y: auto;
+		border-right: 1px solid var(--g-border);
+		padding-right: 0.5rem;
+	}
+	.cowork-tasklist-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--g-fg-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		padding: 0.2rem 0.1rem;
+	}
+	.cowork-refresh {
+		background: transparent;
+		border: none;
+		color: var(--g-fg-muted);
+		cursor: pointer;
+		font-size: 0.95rem;
+	}
+	.cowork-task-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		text-align: left;
+		background: transparent;
+		border: 1px solid transparent;
+		border-radius: var(--g-radius-sm);
+		padding: 0.5rem 0.55rem;
+		cursor: pointer;
+	}
+	.cowork-task-row:hover {
+		background: var(--g-primary-08);
+	}
+	.cowork-task-row.active {
+		background: var(--g-primary-10);
+		border-color: var(--g-primary-20);
+	}
+	.cowork-task-goal {
+		font-size: 0.85rem;
+		color: var(--g-fg);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.cowork-detail {
+		overflow-y: auto;
+		min-height: 0;
+		padding-right: 0.25rem;
+	}
+	.cowork-detail-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 0.75rem;
+	}
+	.cowork-detail-head h2 {
+		font-size: 1.05rem;
+		margin: 0;
+		color: var(--g-fg);
+	}
+	.cowork-detail-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		white-space: nowrap;
+	}
+	.cowork-cost {
+		font-size: 0.8rem;
+		color: var(--g-fg-muted);
+		font-family: var(--g-font-mono);
+	}
+	.cowork-badge {
+		font-size: 0.72rem;
+		font-weight: 600;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		background: var(--g-primary-10);
+		color: var(--g-primary-dark);
+		white-space: nowrap;
+	}
+	.cowork-badge.st-done,
+	.cowork-badge.sub-done {
+		background: rgba(21, 163, 74, 0.12);
+		color: var(--g-state-listening);
+	}
+	.cowork-badge.st-error,
+	.cowork-badge.sub-error,
+	.cowork-badge.st-killed,
+	.cowork-badge.sub-killed {
+		background: rgba(220, 38, 38, 0.12);
+		color: var(--g-state-error);
+	}
+	.cowork-badge.st-awaiting_approval,
+	.cowork-badge.sub-awaiting_approval {
+		background: rgba(217, 119, 6, 0.14);
+		color: var(--g-state-thinking);
+	}
+	.cowork-badge.sub-skipped,
+	.cowork-badge.sub-blocked {
+		background: var(--g-border);
+		color: var(--g-fg-muted);
+	}
+	.cowork-gate {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		background: rgba(217, 119, 6, 0.1);
+		border: 1px solid rgba(217, 119, 6, 0.3);
+		border-radius: var(--g-radius);
+		padding: 0.6rem 0.75rem;
+		margin-bottom: 0.75rem;
+	}
+	.cowork-gate-head {
+		font-size: 0.85rem;
+		color: var(--g-state-thinking);
+		font-weight: 500;
+	}
+	.cowork-approve-all,
+	.cowork-approve {
+		background: var(--g-state-thinking);
+		color: #fff;
+		border: none;
+		border-radius: var(--g-radius-sm);
+		padding: 0.4rem 0.7rem;
+		font-weight: 600;
+		font-size: 0.8rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.cowork-approve {
+		margin-top: 0.4rem;
+	}
+	.cowork-dag {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.cowork-node {
+		border: 1px solid var(--g-border);
+		border-left: 3px solid var(--g-border-strong);
+		border-radius: var(--g-radius);
+		padding: 0.6rem 0.75rem;
+		background: var(--g-surface-raised);
+	}
+	.cowork-node.running {
+		border-left-color: var(--g-state-thinking);
+	}
+	.cowork-node.done {
+		border-left-color: var(--g-state-listening);
+	}
+	.cowork-node.failed {
+		border-left-color: var(--g-state-error);
+	}
+	.cowork-node-head {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.cowork-seq {
+		width: 1.4rem;
+		height: 1.4rem;
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+		background: var(--g-primary-10);
+		color: var(--g-primary-dark);
+		font-size: 0.75rem;
+		font-weight: 700;
+	}
+	.cowork-node-title {
+		font-weight: 600;
+		font-size: 0.9rem;
+		color: var(--g-fg);
+		flex: 1;
+	}
+	.cowork-risk {
+		font-size: 0.7rem;
+		padding: 0.1rem 0.4rem;
+		border-radius: var(--g-radius-sm);
+		background: var(--g-border);
+		color: var(--g-fg-muted);
+	}
+	.cowork-risk.risk-consequential {
+		background: rgba(220, 38, 38, 0.12);
+		color: var(--g-state-error);
+	}
+	.cowork-risk.risk-mutating {
+		background: rgba(217, 119, 6, 0.12);
+		color: var(--g-state-thinking);
+	}
+	.cowork-node-desc {
+		margin: 0.4rem 0 0;
+		font-size: 0.84rem;
+		color: var(--g-fg-muted);
+		line-height: 1.4;
+	}
+	.cowork-node-deps {
+		margin: 0.3rem 0 0;
+		font-size: 0.74rem;
+		color: var(--g-fg-faint);
+	}
+	.cowork-node-out {
+		margin: 0.4rem 0 0;
+		font-size: 0.82rem;
+		color: var(--g-fg);
+		white-space: pre-wrap;
+	}
+	.cowork-node-err {
+		margin: 0.4rem 0 0;
+		font-size: 0.82rem;
+		color: var(--g-state-error);
+		white-space: pre-wrap;
+	}
+	.cowork-logs {
+		margin-top: 0.85rem;
+		border: 1px solid var(--g-border);
+		border-radius: var(--g-radius);
+		overflow: hidden;
+	}
+	.cowork-logs-head {
+		font-size: 0.74rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--g-fg-muted);
+		padding: 0.4rem 0.6rem;
+		background: var(--g-surface);
+		border-bottom: 1px solid var(--g-border);
+	}
+	.cowork-logs-pre {
+		margin: 0;
+		padding: 0.6rem;
+		max-height: 220px;
+		overflow: auto;
+		font-family: var(--g-font-mono);
+		font-size: 0.78rem;
+		line-height: 1.45;
+		background: var(--g-surface-raised);
+		color: var(--g-fg);
+	}
+	.cowork-log-line.err {
+		color: var(--g-state-error);
+	}
+	.cowork-deliverable-btn {
+		margin-top: 0.85rem;
+		background: var(--g-primary-10);
+		color: var(--g-primary-dark);
+		border: 1px solid var(--g-primary-20);
+		border-radius: var(--g-radius);
+		padding: 0.55rem 0.85rem;
+		font-weight: 600;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.cowork-deliverable-btn:hover {
+		background: var(--g-primary-15);
 	}
 	.new {
 		background: var(--g-primary-15);
@@ -2616,6 +3526,22 @@
 		border-radius: 6px;
 		color: var(--g-state-error);
 		font-size: 0.875rem;
+	}
+
+	.route-note {
+		max-width: 800px;
+		margin: 0 auto 0.35rem;
+		padding: 0.2rem 0.6rem;
+		font-size: 0.78rem;
+		color: var(--g-fg-muted, #6b6b6b);
+		opacity: 0.85;
+	}
+	.route-note.pro {
+		color: var(--g-primary);
+		opacity: 1;
+	}
+	.route-note .rn-reason {
+		opacity: 0.7;
 	}
 
 	.composer {
