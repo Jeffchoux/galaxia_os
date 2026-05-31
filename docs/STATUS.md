@@ -1,7 +1,41 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **routeur de tâches souverain (mode « ✨ Auto », incrément 1 coder/chat)** : le sélecteur de modèle gagne un mode **Auto par défaut** qui choisit seul free (Groq, lecture) vs Opus (écriture/code/rédaction ou pièce jointe), 100 % local/déterministe, décision affichée pour rester transparent sur le coût. Build `svelte-check` 0 erreur + `vite build` OK. **Non déployé / non commité** (working tree). Détail § « Routeur de tâches souverain » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Routeur de tâches souverain — mode « ✨ Auto » (2026-05-31, session root)
+
+**Origine :** Jeff a partagé un post viral « j'utilise 8 outils IA, un par job » et a
+demandé de l'implémenter. Pris au pied de la lettre, le post (8 SaaS propriétaires :
+Claude, Gemini, Blotato, NotebookLM, puzzle.io, Apify, 10Web, Codex) **viole le contrat
+fondateur** (pas de dépendance SaaS, tout empaquetable/offline pour les filles). Décision
+prise avec Jeff (questions explicites) : garder **le principe** (« bon moteur pour la bonne
+tâche »), version **souveraine**, et commencer par le **routage auto coder/chat** — extension
+directe du sélecteur free/pro existant.
+
+**Livré (build `svelte-check` 0 erreur + `vite build` OK ; NON déployé, NON commité) :**
+- **`src/lib/server/router.ts`** (nouveau) : `routeChat(message, hasDocs)` → `{ engine, reason }`.
+  Heuristique **100 % locale, déterministe, zéro coût, zéro réseau** (donc empaquetable tel
+  quel dans les filles). Escalade vers Opus (`pro`) si : verbe d'**écriture de code** (implémente,
+  modifie, corrige, refactor, crée un fichier/fonction, commit, push, déploie…), verbe de
+  **rédaction/com** (rédige, écris-moi un post/mail…), ou **pièce jointe** (le mode rapide ne voit
+  pas les fichiers/images). Sinon `free`. Conforme « pas de premium par défaut » : le défaut reste
+  gratuit, on n'escalade que sur signal clair. Validé sur 12 cas représentatifs (12/12).
+- **`src/routes/api/chat/+server.ts`** : accepte `mode: 'auto'`. En auto, résout via `routeChat`
+  une fois les documents chargés, puis émet un event SSE **`routing` `{engine, reason}`** avant le
+  stream. `'pro'`/`'free'` explicites inchangés ; mode absent → `free` (on **ne change pas** le
+  défaut des clients hors cockpit, ex. Telegram).
+- **`src/routes/+page.svelte`** : le sélecteur passe à 3 modes (**✨ Auto / ⚡ Rapide / 🧠 Opus**),
+  **Auto par défaut** (persisté `localStorage`). Nouvelle ligne discrète sous les messages
+  « ✨ Auto → 🧠 Opus / ⚡ Rapide · <raison> » affichée en mode auto pour rester transparent sur
+  le moteur (et donc le coût) du tour. Aucune régression sur les modes manuels.
+
+**Limites / suites possibles :** (1) heuristique par mots-clés — un cas ambigu peut être mal
+classé ; Jeff peut toujours forcer via le bouton. (2) Prochains « jobs » du post à décliner en
+souverain : « NotebookLM local » (RAG sur les docs), scraping leads façon Apify containerisé.
+
+**À faire :** brancher + PR avec les autres fichiers non commités du working tree, puis
+`sudo systemctl restart galaxia-cockpit.service` pour déployer.
 
 ## Vocaux Telegram → transcription Whisper (2026-05-31, session galaxia)
 

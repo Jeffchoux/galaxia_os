@@ -16,6 +16,7 @@ import {
 	summarizeHistory,
 	type ChatMode
 } from '$lib/server/claude';
+import { routeChat, type RouteDecision } from '$lib/server/router';
 
 async function maybeSummarize(conversation: Conversation, userId: string): Promise<void> {
 	try {
@@ -43,9 +44,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	};
 	const userMessage = (body.message ?? '').trim();
 	if (!userMessage) throw error(400, 'empty message');
-	// Défaut = 'free' (Groq) : la politique de Jeff est "pas de modèle premium par
-	// défaut". Le mode pro (Opus 4.8) est explicitement demandé par le client.
-	const mode: ChatMode = body.mode === 'pro' ? 'pro' : 'free';
+	// 'pro' / 'free' = choix manuel explicite. 'auto' = routeur souverain
+	// (résolu plus bas, une fois les documents chargés). Tout autre cas, y
+	// compris mode absent → 'free' : la politique de Jeff est "pas de modèle
+	// premium par défaut" (on ne change pas le défaut des clients hors cockpit).
+	const requestedMode = body.mode;
 
 	let conversation = body.conversation_id
 		? getConversation(body.conversation_id, userId)
@@ -59,6 +62,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const history = listMessages(conversation.id, userId);
 	const docs = loadConversationDocuments(conversation.id, userId);
 
+	// Résolution du moteur. En 'auto', le routeur souverain (local, gratuit,
+	// déterministe) choisit free vs pro selon la nature de la demande et la
+	// présence de pièces jointes. On renvoie sa décision au client (event
+	// 'routing') pour rester transparent sur le moteur retenu et son coût.
+	let mode: ChatMode;
+	let routing: RouteDecision | null = null;
+	if (requestedMode === 'pro') {
+		mode = 'pro';
+	} else if (requestedMode === 'auto') {
+		routing = routeChat(userMessage, docs.length > 0);
+		mode = routing.engine;
+	} else {
+		mode = 'free';
+	}
+
 	const encoder = new TextEncoder();
 	const stream = new ReadableStream({
 		async start(controller) {
@@ -67,6 +85,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			};
 
 			send('conversation', { id: conversation.id, title: conversation.title, is_new: isNew });
+			if (routing) send('routing', { engine: routing.engine, reason: routing.reason });
 
 			let assistantText = '';
 			try {
