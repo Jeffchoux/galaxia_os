@@ -5,9 +5,13 @@ Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/cowork
 # Le réseau n'est requis QUE pour les appels au modèle (planner/synthèse) et le
 # mode egress opt-in d'une sous-tâche ; on attend network-online par prudence.
 Wants=network-online.target
-After=network-online.target docker.service
+After=network-online.target docker.service galaxia-cowork-egress.service
 # Sans Docker, l'orchestrateur ne peut pas lancer de bac à sable : on lie.
 Requires=docker.service
+# Egress filtré : les sous-tâches (COWORK_NET=egress) sortent UNIQUEMENT par le
+# proxy allowlisté. Sans lui, le réseau interne cowork-egress n'a aucune route
+# sortante → on veut le proxy démarré avant l'orchestrateur.
+Wants=galaxia-cowork-egress.service
 
 [Service]
 # Daemon (boucle infinie claimNext/poll), pas oneshot — cf. tasks.py/worker.py.
@@ -26,6 +30,15 @@ Environment=COWORK_DB_PATH=/home/galaxia/galaxia-project/apps/cockpit/data/cockp
 # Répertoire de travail des tâches (run dirs + workspaces des sous-tâches montés
 # dans les conteneurs). Doit rester inscriptible (cf. ReadWritePaths plus bas).
 Environment=COWORK_RUN_DIR=/home/galaxia/.local/share/galaxia/cowork
+# Egress FILTRÉ pour les sous-tâches : réseau interne cowork-egress + proxy
+# allowlisté (cf. galaxia-cowork-egress.service). 'none' désactiverait tout réseau.
+Environment=COWORK_NET=egress
+# La CLI `claude` (lancée par le SDK pour PLAN/SYNTHÈSE) veut écrire sa config/cache.
+# Sous ProtectHome=read-only, $HOME (/home/galaxia) est en lecture seule → on la
+# redirige vers le /tmp privé (writable via PrivateTmp), comme l'image sandbox.
+# Aucune écriture sous /home nécessaire ; rien à persister (clé via ANTHROPIC_API_KEY).
+Environment=HOME=/tmp
+Environment=CLAUDE_CONFIG_DIR=/tmp/.claude
 
 ExecStart=/usr/bin/node /home/galaxia/galaxia-project/agents/cowork/orchestrator.mjs
 

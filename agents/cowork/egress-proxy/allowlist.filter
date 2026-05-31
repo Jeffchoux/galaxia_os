@@ -1,0 +1,13 @@
+# Galaxia Cowork — allowlist d'egress des bacs à sable (regex POSIX étendues).
+#
+# FilterDefaultDeny Yes (tinyproxy.conf) => SEULS les hôtes qui matchent une
+# ligne ci-dessous peuvent être joints par une sous-tâche. Une ligne = un motif
+# d'hôte. Garder cette liste AUSSI COURTE QUE POSSIBLE : chaque entrée est une
+# permission de sortie accordée à du code exécuté en autonomie.
+#
+# Par défaut : uniquement les API des modèles d'exécution (planner = hôte, pas
+# concerné ; ici c'est l'agent IN-SANDBOX qui sort). Anthropic (défaut Sonnet)
+# et Groq (mode gratuit). Ajouter un hôte ici = décision consciente.
+
+^api\.anthropic\.com$
+^api\.groq\.com$

@@ -132,8 +132,12 @@ const q = {
      updated_at = ? WHERE id = ?`
   ),
   runnableSubtasks: db.prepare(
+    // Runnable sans approbation : 'safe' ET 'mutating' (autonomes par politique,
+    // cf. docs/COWORK.md — la boîte jetable borne le rayon d'impact). Seul
+    // 'consequential' exige une approbation explicite (approved=1) ; il est mis
+    // en 'awaiting_approval' par applyGate, donc déjà exclu du status='pending'.
     `SELECT * FROM cowork_subtasks WHERE task_id = ? AND status = 'pending'
-     AND (risk = 'safe' OR approved = 1) ORDER BY seq ASC`
+     AND (risk IN ('safe','mutating') OR approved = 1) ORDER BY seq ASC`
   ),
   claimSubtask: db.prepare(
     "UPDATE cowork_subtasks SET status = 'running', updated_at = ? WHERE id = ? AND status = 'pending'"
@@ -392,7 +396,22 @@ function renderSubtaskInput(taskId, subtask) {
     `# Sous-tâche : ${subtask.title}`,
     ``,
     subtask.description,
-    upstream ? `\n## Contexte des étapes précédentes\n\n${upstream}` : ``
+    upstream ? `\n## Contexte des étapes précédentes\n\n${upstream}` : ``,
+    // Protocole de sortie OBLIGATOIRE : l'orchestrateur ne considère la sous-tâche
+    // réussie QUE s'il lit, en toute dernière ligne de stdout, un objet JSON seul
+    // `{"ok":...,"summary":...}`. Sans cette consigne, l'agent in-sandbox rédige
+    // une prose libre et la sous-tâche est marquée en échec faute de sentinelle.
+    `\n## Protocole de sortie (impératif)`,
+    ``,
+    `Tu travailles dans /workspace (seul dossier inscriptible). Effectue la sous-tâche,`,
+    `puis termine ta réponse par une **toute dernière ligne** contenant UNIQUEMENT cet`,
+    `objet JSON, sans texte ni balise autour :`,
+    ``,
+    `{"ok": true, "summary": "résumé bref et factuel de ce qui a été produit"}`,
+    ``,
+    `Mets \`"ok": false\` si tu n'as pas pu mener la sous-tâche à bien, avec un summary`,
+    `expliquant pourquoi. Cette ligne JSON finale est lue par l'orchestrateur : elle est`,
+    `obligatoire et doit être la dernière ligne de ta sortie.`
   ]
     .filter(Boolean)
     .join('\n');
@@ -416,12 +435,15 @@ function runSubtask(task, subtask) {
       return;
     }
     const containerName = `cowork-${subtask.id}`;
-    // Réseau SOUVERAIN PAR DÉFAUT : coupé (`none`) pour TOUTES les sous-tâches,
-    // safe comme mutating. L'egress n'est jamais accordé automatiquement (pas de
-    // champ « besoin réseau » déclaré dans le plan) → aucune sous-tâche jetable ne
-    // peut exfiltrer /workspace ni tirer un payload arbitraire. L'egress filtré
-    // reste un opt-in explicite futur (cf. docs/COWORK.md).
-    const net = 'none';
+    // Réseau de la sandbox, piloté par COWORK_NET (posé par l'unit systemd) :
+    //  - 'egress' (déploiement mère) : réseau docker INTERNE cowork-egress dont
+    //    le seul chemin sortant est le proxy filtré (allowlist api du modèle).
+    //    L'agent in-sandbox joint le LLM, mais NE PEUT joindre aucun autre hôte —
+    //    pas d'exfiltration de /workspace ni de pull de payload arbitraire.
+    //  - 'none' (défaut sûr si non configuré) : aucun réseau du tout.
+    // Le durcissement (read-only, cap-drop=ALL, no-new-privileges, /workspace seul
+    // montage, conteneur jetable) est conservé dans les deux cas. Cf. docs/COWORK.md.
+    const net = process.env.COWORK_NET ?? 'none';
 
     updateCoworkSubtaskStatus(subtask.id, 'running', { container_id: containerName });
     emit(task.id, 'subtask', {
