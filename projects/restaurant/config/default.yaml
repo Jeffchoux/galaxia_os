@@ -1,0 +1,102 @@
+# ============================================================================
+# Galaxia / projet « restaurant » — configuration par défaut
+# ----------------------------------------------------------------------------
+# Valeurs SÛRES par défaut. Le système démarre en DRY-RUN total (Anneau 0) :
+# aucun e-mail réel, aucune publication publique indexée, aucun paiement.
+# Voir docs/01_CRITICAL_ANALYSIS.md §6 (stratégie par anneaux).
+# Surcharge possible via config/local.yaml (gitignored) ou variables d'env.
+# ============================================================================
+
+project: restaurant
+environment: dev
+
+# --- Interrupteur maître de sûreté -----------------------------------------
+# dry_run: true  => tout est simulé/écrit sur disque, RIEN ne part à l'extérieur.
+# Passer à false exige d'avoir tranché les bloquants de docs/01 §13
+# (domaine d'envoi dédié, SPF/DKIM/DMARC, base légale, Stripe).
+dry_run: true
+
+# Anneau de déploiement actif (0 = dry-run total — cf. docs/01 §6)
+ring: 0
+
+# --- Chemins (relatifs à projects/restaurant/ sauf absolus) ----------------
+paths:
+  database: data/restaurant.db
+  schema: database/schema.sql
+  fixtures: data/fixtures.json
+  site_template: templates/site
+  sites_output: sites
+  dry_run_emails: logs/dry_run_emails
+  # En production (Anneau 1+), Caddy sert depuis ce webroot :
+  public_sites_root: /var/www/galaxia-restaurant-sites
+
+# --- Découverte ------------------------------------------------------------
+discovery:
+  source: osm-overpass          # source primaire licite (ODbL) — fixtures en dry-run
+  amenity: restaurant
+  cities:
+    - Tours
+    - Blois
+  max_per_run: 20               # plafond par exécution (rate limit)
+  user_agent: "GalaxiaBot/1.0 (+https://galaxia-os.com/bot)"
+  request_delay_ms: 1500        # politesse entre requêtes source
+
+# --- Audit de site (SSRF-safe) ---------------------------------------------
+audit:
+  timeout_ms: 8000
+  max_bytes: 2000000
+  respect_robots: true
+  block_private_ips: true       # anti-SSRF (cf. docs/01 §11)
+  qualify_below_score: 60       # site jugé « faible » sous ce score → cible
+
+# --- Modèles LLM (politique : pas de premium par défaut) -------------------
+llm:
+  default_provider: ollama      # local, gratuit, souverain
+  ollama:
+    base_url: http://127.0.0.1:11434
+    model: llama3.1:8b
+  premium:
+    provider: claude            # ad hoc seulement
+    enabled: false              # désactivé par défaut (coût)
+    model: claude-sonnet-4-6
+  monthly_premium_cap_usd: 5.0  # plafond dur de dépense premium (docs/06)
+
+# --- Génération de site ----------------------------------------------------
+site:
+  noindex: true                 # TOUJOURS true tant que non réclamé
+  ttl_days: 7                   # hébergement temporaire
+  banner: "Aperçu non officiel généré par Galaxia — non affilié. Réclamez ce site ou demandez sa suppression."
+  base_domain: try.galaxia-os.com
+
+# --- E-mail (DRY-RUN : généré sur disque, jamais envoyé) -------------------
+email:
+  send_enabled: false           # garde-fou n°1 (jamais d'envoi au MVP)
+  languages: [fr, en]
+  max_followups: 2              # relances bornées
+  followup_delay_days: 4
+  # Obligatoire dans CHAQUE e-mail (CAN-SPAM / ePrivacy — docs/01 §4) :
+  sender_identity: "Galaxia — service de sites web pour restaurants"
+  sender_postal_address: "À DÉFINIR — adresse postale physique requise avant tout envoi réel"
+  unsubscribe_base_url: "https://try.galaxia-os.com/u"  # /u/{token}
+  daily_send_cap: 50            # réchauffe progressive (Anneau 1+)
+
+# --- Abonnement (Anneau 3 — paiement délégué, aucune carte stockée) --------
+billing:
+  enabled: false
+  provider: stripe
+  price_eur: 10
+  price_usd: 10
+  interval: month
+
+# --- Rétention / conformité RGPD -------------------------------------------
+compliance:
+  retention_days: 90            # purge des prospects non convertis
+  require_generic_email: true   # ne contacter QUE contact@/info@...
+  takedown_sla_hours: 72
+
+# --- Garde-fous opérationnels ----------------------------------------------
+limits:
+  task_timeout_sec: 1800
+  max_bounce_rate: 0.05         # au-delà → kill-switch envoi
+  max_complaint_rate: 0.001
+  min_free_disk_gb: 5

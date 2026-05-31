@@ -280,3 +280,38 @@ Et le Sprint 3 prévu = **PME pilote vraie** (identification + déploiement + on
 - **Question :** on traite ça dans le Volet C voix, ou en priorité indépendante ? Pas urgent cette semaine.
 
 **Impact si pas tranché :** je peux livrer **dès maintenant** le chantier #2 (brancher `pending/` sur le coder) en une PR reviewable — il est inerte tant que `pending/` est vide et tant que 14.1 n'est pas réglé, donc zéro risque. Le fix `GH_TOKEN` (#0) attend ta réponse à 14.1 car c'est un choix de credential.
+
+---
+
+## 15. Projet « restaurant » — bloquants AVANT tout envoi d'e-mail réel
+
+**Posée le :** 2026-05-28
+**Statut :** ouverte — **n'empêche rien pour l'instant** (le système est livré et tourne en
+**dry-run total** : aucun e-mail envoyé, aucun site publié, aucun paiement).
+
+J'ai construit de bout en bout le système autonome « restaurant » (génère des sites pour
+restos à faible présence web, les héberge, les contacte, les convertit à 10 €/mois). Détail
+dans [`projects/restaurant/`](projects/restaurant/) (docs `00`→`09`). Tout est validé en
+dry-run. Je continue seul tout le travail interne (Ollama, découverte OSM en lecture,
+worker 24/7, page de désinscription). **Mais 4 décisions te reviennent** car ce sont des
+risques juridiques / financiers / de réputation — je ne les prends pas seul :
+
+**15.1 — Envoi d'e-mail : domaine + prestataire.** On ne peut PAS envoyer depuis l'IP/le
+domaine de Galaxia (ça brûlerait la réputation de `app.galaxia-os.com`). Il faut un
+**domaine d'envoi dédié** + SPF/DKIM/DMARC + un **prestataire transactionnel**. Veux-tu que
+je provisionne un domaine dédié et que je propose 2-3 prestataires ?
+
+**15.2 — Base légale prospection B2B.** Je ne contacte que des adresses **génériques**
+(`contact@`, `info@`) de restaurants, base « intérêt légitime », opt-out 1 clic — conforme
+ePrivacy FR. OK pour cibler **la France d'abord** ? (les US / CAN-SPAM, plus tard.)
+
+**15.3 — Paiement.** Abonnement 10 €/mois ⇒ il faut un **compte Stripe** (Galaxia ne touche
+jamais la carte) + mentions légales / CGV / politique de confidentialité de l'offre. Tu
+ouvres le compte Stripe, ou je prépare tout et tu valides ?
+
+**15.4 — Adresse postale physique.** Obligatoire dans chaque e-mail commercial (loi). Quelle
+adresse afficher comme expéditeur ?
+
+**Impact si pas tranché :** **aucun blocage du travail** — je reste en dry-run et j'avance
+sur tout l'interne. Mais aucun e-mail réel ne partira tant que 15.1, 15.2 et 15.4 ne sont
+pas réglés (c'est le garde-fou voulu), et aucune facturation tant que 15.3 ne l'est pas.

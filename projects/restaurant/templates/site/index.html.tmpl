@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Tant que le site n'est pas réclamé par le restaurateur, il n'est PAS indexable -->
+  <meta name="robots" content="{{ROBOTS}}">
+  <title>{{NAME}}{{TITLE_CITY}}</title>
+  <meta name="description" content="{{META_DESCRIPTION}}">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Bandeau de transparence OBLIGATOIRE (docs/01 §3.2) -->
+  <div class="galaxia-banner" role="note">
+    {{BANNER}}
+    <a class="galaxia-banner__link" href="{{TAKEDOWN_URL}}">Supprimer ce site</a>
+  </div>
+
+  <header class="hero">
+    <h1>{{HERO_TAGLINE}}</h1>
+    <p class="hero__cuisine">{{CUISINE}}</p>
+  </header>
+
+  <main>
+    <section class="about">
+      <p>{{ABOUT}}</p>
+    </section>
+
+    {{SECTIONS}}
+  </main>
+
+  <section class="cta">
+    <p>{{CTA}}</p>
+    <a class="cta__btn" href="{{CLAIM_URL}}">Réclamer mon site</a>
+  </section>
+
+  <footer class="site-footer">
+    <p>{{NAME}}{{FOOTER_CITY}}</p>
+    <p class="site-footer__meta">Aperçu généré par Galaxia · <a href="{{TAKEDOWN_URL}}">Demander le retrait</a></p>
+  </footer>
+</body>
+</html>
