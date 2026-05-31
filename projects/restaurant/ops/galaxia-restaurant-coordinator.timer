@@ -1,0 +1,13 @@
+# Galaxia / restaurant — déclenche le coordinator une fois par jour.
+# Aligné sur les autres timers Galaxia (digest 06:00, veille 06:30, coder 07:04).
+# NON installé par défaut.
+[Unit]
+Description=Galaxia — cycle quotidien restaurant
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

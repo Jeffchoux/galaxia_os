@@ -1,0 +1,15 @@
+To: info@trattoria-damarco.example
+Subject: Un aperçu de site web gratuit pour Trattoria da Marco
+X-Galaxia-DryRun: true
+X-Galaxia-Lang: fr
+
+Bonjour l'équipe de Trattoria da Marco,
+
+Nous avons remarqué que votre restaurant a peu ou pas de site web. Nous en avons préparé un aperçu gratuit, sans engagement :
+  https://try.galaxia-os.com/trattoria-da-marco-tours/
+
+S'il vous plaît, vous pouvez le garder en ligne pour 10 €/mois. Sinon, ignorez simplement ce message — ou demandez sa suppression en un clic.
+
+Message commercial envoyé par Galaxia — service de sites web pour restaurants.
+Adresse postale : À DÉFINIR — adresse postale physique requise avant tout envoi réel
+Se désinscrire (plus aucun e-mail de notre part) : https://try.galaxia-os.com/u/mgunAjNt36tNKMQMp8-KLuICC1tvvK3I

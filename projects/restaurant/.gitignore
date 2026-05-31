@@ -1,0 +1,18 @@
+# Artefacts générés / locaux du projet restaurant — non versionnés.
+# (Le site d'exemple sous sites/ et les e-mails d'exemple sous logs/dry_run_emails/
+#  SONT versionnés volontairement comme livrables de démonstration.)
+
+# Base SQLite et journaux WAL
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Surcharge de config locale (peut contenir des secrets) — JAMAIS committée
+config/local.yaml
+.env
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc

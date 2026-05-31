@@ -1,0 +1,17 @@
+# Galaxia / restaurant — coordinator (oneshot, planifie le cycle quotidien).
+# Déclenché par galaxia-restaurant-coordinator.timer. NON installé par défaut.
+[Unit]
+Description=Galaxia — coordinator restaurant (met en file le cycle quotidien)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=galaxia
+Group=galaxia
+WorkingDirectory=/home/galaxia/galaxia-project/projects/restaurant
+EnvironmentFile=-/opt/galaxia/config/.env
+ExecStart=/home/galaxia/.claude/galaxia/venv/bin/python -m pipeline.coordinator
+NoNewPrivileges=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
