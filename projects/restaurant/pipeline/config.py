@@ -122,8 +122,7 @@ def _mini_yaml(text: str) -> dict:
     return data if isinstance(data, dict) else {"_root": data}
 
 
-def load_config(path: str | Path | None = None) -> dict:
-    cfg_path = Path(path) if path else PROJECT_ROOT / "config" / "default.yaml"
+def _load_one(cfg_path: Path) -> dict:
     text = cfg_path.read_text(encoding="utf-8")
     try:
         import yaml  # type: ignore
@@ -133,6 +132,30 @@ def load_config(path: str | Path | None = None) -> dict:
     except ImportError:
         pass
     return _mini_yaml(text)
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    """Fusionne récursivement `over` dans `base` (les maps imbriquées sont fusionnées,
+    les scalaires/listes écrasés)."""
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def load_config(path: str | Path | None = None) -> dict:
+    cfg_path = Path(path) if path else PROJECT_ROOT / "config" / "default.yaml"
+    cfg = _load_one(cfg_path)
+    # Surcharge locale (gitignored) : fusionnée uniquement pour le chargement par défaut.
+    # Sert p.ex. à activer le mode canari (dry_run:false + redirect_all_to) sans modifier
+    # le défaut sûr committé.
+    if path is None:
+        local = PROJECT_ROOT / "config" / "local.yaml"
+        if local.exists():
+            _deep_merge(cfg, _load_one(local))
+    return cfg
 
 
 def resolve_path(cfg: dict, key: str) -> Path:

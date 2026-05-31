@@ -18,6 +18,25 @@ def _make_token() -> str:
     return secrets.token_urlsafe(24)
 
 
+def resolve_send_target(ecfg: dict, to_email: str, subject: str):
+    """Garde-fou destinataire pour un envoi RÉEL (dry=0).
+
+    - si `email.redirect_all_to` est défini → CANARI : tout part UNIQUEMENT vers
+      cette adresse, et le sujet est préfixé pour tracer le destinataire prévu ;
+    - sinon, envoi vers le vrai prospect SEULEMENT si `email.allow_production_send` ;
+    - sinon bloqué.
+
+    Retourne (destinataire_réel | None, sujet_à_envoyer, raison_blocage | None).
+    Si raison_blocage n'est pas None, NE PAS expédier.
+    """
+    redirect = (ecfg.get("redirect_all_to") or "").strip()
+    if redirect:
+        return redirect, f"[CANARI → {to_email}] {subject}", None
+    if ecfg.get("allow_production_send", False):
+        return to_email, subject, None
+    return None, subject, "production_send_not_allowed"
+
+
 def _bodies(business: dict, site_url: str, unsub_url: str, postal: str,
             sender: str, lang: str) -> tuple[str, str, str]:
     name = business["name"]
@@ -101,17 +120,62 @@ def generate_email(conn, cfg: dict, business: dict, website: dict,
             f"X-Galaxia-Lang: {lang}\n\n{text}", encoding="utf-8",
         )
 
-    status = "dry_run" if dry else "queued"
+    if dry:
+        cur = conn.execute(
+            "INSERT INTO emails (business_id, website_id, kind, to_email, subject,"
+            " body_text, body_html, unsubscribe_token, sender_identity, status,"
+            " dry_run, dry_run_path, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?, 'dry_run', ?, ?, ?, ?)",
+            (business["id"], website["website_id"], kind, to_email, subject, text,
+             html_body, token, sender, dry, dry_path, ts, ts),
+        )
+        eid = cur.lastrowid
+        _db.set_business_status(conn, business["id"], "contacted")
+        _db.audit(conn, "email", eid, "dry_run",
+                  detail={"to": to_email, "lang": lang, "path": dry_path})
+        return {"email_id": eid, "status": "dry_run", "path": dry_path, "token": token}
+
+    # --- Envoi RÉEL (dry=0) : garde-fou destinataire AVANT toute expédition ---
+    actual_to, send_subject, blocked_reason = resolve_send_target(ecfg, to_email, subject)
+    if blocked_reason:
+        cur = conn.execute(
+            "INSERT INTO emails (business_id, website_id, kind, to_email, subject,"
+            " body_text, body_html, unsubscribe_token, sender_identity, status,"
+            " dry_run, blocked_reason, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?, 'blocked', ?, ?, ?, ?)",
+            (business["id"], website["website_id"], kind, to_email, subject, text,
+             html_body, token, sender, dry, blocked_reason, ts, ts),
+        )
+        _db.audit(conn, "email", cur.lastrowid, "blocked",
+                  detail={"reason": blocked_reason, "to": to_email})
+        return {"email_id": cur.lastrowid, "status": "blocked", "reason": blocked_reason}
+
     cur = conn.execute(
         "INSERT INTO emails (business_id, website_id, kind, to_email, subject,"
         " body_text, body_html, unsubscribe_token, sender_identity, status,"
-        " dry_run, dry_run_path, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " dry_run, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?, 'queued', ?, ?, ?)",
         (business["id"], website["website_id"], kind, to_email, subject, text,
-         html_body, token, sender, status, dry, dry_path, ts, ts),
+         html_body, token, sender, dry, ts, ts),
     )
     eid = cur.lastrowid
+
+    from . import mailer
+    try:
+        r = mailer.send_email(cfg, actual_to, send_subject, text, html_body)
+    except mailer.MailerError as e:
+        conn.execute("UPDATE emails SET status='failed', blocked_reason=?, updated_at=?"
+                     " WHERE id=?", (str(e)[:200], _db.now_ms(), eid))
+        _db.audit(conn, "email", eid, "failed",
+                  detail={"error": str(e)[:200], "to_actual": actual_to})
+        return {"email_id": eid, "status": "failed", "error": str(e)}
+
+    conn.execute("UPDATE emails SET status='sent', sent_at=?, updated_at=? WHERE id=?",
+                 (_db.now_ms(), _db.now_ms(), eid))
     _db.set_business_status(conn, business["id"], "contacted")
-    _db.audit(conn, "email", eid, "queued" if not dry else "dry_run",
-              detail={"to": to_email, "lang": lang, "path": dry_path})
-    return {"email_id": eid, "status": status, "path": dry_path, "token": token}
+    _db.audit(conn, "email", eid, "sent",
+              detail={"to_intended": to_email, "to_actual": actual_to,
+                      "redirected": actual_to != to_email,
+                      "provider_id": r.get("provider_id")})
+    return {"email_id": eid, "status": "sent", "to_actual": actual_to,
+            "provider_id": r.get("provider_id"), "token": token}

@@ -314,5 +314,35 @@ class OverpassDiscovery(unittest.TestCase):
             conn.close()
 
 
+class CanarySendGuard(unittest.TestCase):
+    """Garde-fou destinataire d'un envoi RÉEL (email_gen.resolve_send_target), sans réseau."""
+
+    def test_redirect_forces_single_recipient(self):
+        to, subj, blocked = email_gen.resolve_send_target(
+            {"redirect_all_to": "jeff@example.com"}, "prospect@resto.fr", "Sujet")
+        self.assertIsNone(blocked)
+        self.assertEqual(to, "jeff@example.com")          # jamais le prospect
+        self.assertIn("prospect@resto.fr", subj)          # destinataire prévu tracé
+
+    def test_production_blocked_by_default(self):
+        to, _subj, blocked = email_gen.resolve_send_target(
+            {}, "prospect@resto.fr", "Sujet")
+        self.assertIsNone(to)
+        self.assertEqual(blocked, "production_send_not_allowed")
+
+    def test_production_allowed_only_with_explicit_flag(self):
+        to, _subj, blocked = email_gen.resolve_send_target(
+            {"allow_production_send": True}, "prospect@resto.fr", "Sujet")
+        self.assertIsNone(blocked)
+        self.assertEqual(to, "prospect@resto.fr")
+
+    def test_redirect_wins_over_production_flag(self):
+        to, _subj, blocked = email_gen.resolve_send_target(
+            {"redirect_all_to": "jeff@example.com", "allow_production_send": True},
+            "prospect@resto.fr", "Sujet")
+        self.assertIsNone(blocked)
+        self.assertEqual(to, "jeff@example.com")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
