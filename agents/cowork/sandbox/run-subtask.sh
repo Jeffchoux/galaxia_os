@@ -70,6 +70,13 @@ case "$COWORK_NET" in
   *) die "COWORK_NET invalide (attendu 'none' ou 'egress'): $COWORK_NET" ;;
 esac
 
+# Egress FILTRÉ : en mode 'egress', la sandbox n'est PAS mise sur un bridge NAT
+# (qui lui donnerait Internet en grand) mais sur le réseau docker INTERNE
+# COWORK_EGRESS_NETWORK, dont le seul chemin sortant est le proxy tinyproxy
+# (allowlist api du modèle). On force la CLI à passer par ce proxy via HTTPS_PROXY.
+COWORK_EGRESS_NETWORK="${COWORK_EGRESS_NETWORK:-cowork-egress}"
+COWORK_HTTPS_PROXY="${COWORK_HTTPS_PROXY:-http://cowork-proxy:8888}"
+
 COWORK_SUBTASK_TIMEOUT="${COWORK_SUBTASK_TIMEOUT:-600}"
 case "$COWORK_SUBTASK_TIMEOUT" in
   ''|*[!0-9]*) die "COWORK_SUBTASK_TIMEOUT doit être un entier (secondes): $COWORK_SUBTASK_TIMEOUT" ;;
@@ -80,7 +87,39 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 command -v "$DOCKER_BIN" >/dev/null 2>&1 || die "binaire docker introuvable: $DOCKER_BIN"
 
+# Réseau docker effectif + variables proxy, selon le mode d'egress.
+#  - none   : --network=none (aucun réseau ; l'agent in-sandbox ne joint aucune
+#             API → réservé aux sous-tâches qui n'appellent pas de modèle).
+#  - egress : réseau INTERNE cowork-egress + HTTPS_PROXY vers le proxy filtré.
+PROXY_ENV=()
+case "$COWORK_NET" in
+  none)
+    DOCKER_NET="none"
+    ;;
+  egress)
+    "$DOCKER_BIN" network inspect "$COWORK_EGRESS_NETWORK" >/dev/null 2>&1 \
+      || die "réseau egress '$COWORK_EGRESS_NETWORK' absent (galaxia-cowork-egress.service lancé ?)"
+    DOCKER_NET="$COWORK_EGRESS_NETWORK"
+    PROXY_ENV=(
+      -e "HTTPS_PROXY=${COWORK_HTTPS_PROXY}"
+      -e "HTTP_PROXY=${COWORK_HTTPS_PROXY}"
+      -e "https_proxy=${COWORK_HTTPS_PROXY}"
+      -e "http_proxy=${COWORK_HTTPS_PROXY}"
+      -e "NO_PROXY=localhost,127.0.0.1"
+      -e "no_proxy=localhost,127.0.0.1"
+    )
+    ;;
+esac
+
 CONTAINER_NAME="cowork-${SUBTASK_ID}"
+
+# La sandbox doit pouvoir lire/écrire /workspace (bind-mount). On lance donc le
+# conteneur sous l'uid:gid PROPRIÉTAIRE du workspace hôte (l'utilisateur galaxia),
+# et NON un 1000 en dur : sur cette mère galaxia est uid 1001, et l'uid varie d'une
+# galaxie fille à l'autre. Cela garantit l'accès rw quel que soit l'uid local.
+WORKSPACE_USER="$(stat -c '%u:%g' "$COWORK_WORKSPACE" 2>/dev/null)" \
+  || die "stat du workspace impossible: $COWORK_WORKSPACE"
+[ -n "$WORKSPACE_USER" ] || die "uid:gid du workspace introuvable: $COWORK_WORKSPACE"
 
 # --- nettoyage idempotent ----------------------------------------------------
 
@@ -109,16 +148,24 @@ trap on_term TERM INT
 # fiable, surtout en --network=none).
 WATCHDOG_PID=""
 start_watchdog() {
+  # IMPORTANT : le sous-shell est entièrement redirigé vers /dev/null. Sinon son
+  # `sleep` hérite des pipes stdout/stderr du wrapper ; si le `sleep` se retrouve
+  # orphelin (un simple `kill` du sous-shell ne tue PAS son enfant `sleep`), il
+  # garde ces pipes ouverts → le parent (orchestrateur) ne voit jamais l'EOF, son
+  # événement `close` ne se déclenche pas, et la sous-tâche reste « running » à vie.
+  # La redirection coupe ce lien ; le `docker kill` au timeout reste effectif, et
+  # l'orchestrateur a de toute façon son propre timeout + log côté hôte.
   (
     sleep "$COWORK_SUBTASK_TIMEOUT"
-    printf '[run-subtask %s] WARN: timeout %ss dépassé — docker kill %s\n' \
-      "$SUBTASK_ID" "$COWORK_SUBTASK_TIMEOUT" "$CONTAINER_NAME" >&2
     "$DOCKER_BIN" kill "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  ) &
+  ) >/dev/null 2>&1 &
   WATCHDOG_PID=$!
 }
 stop_watchdog() {
   [ -n "${WATCHDOG_PID:-}" ] || return 0
+  # Tuer le sous-shell ET son `sleep` enfant (best effort) : pkill -P cible les
+  # enfants directs ; le `kill` final achève le sous-shell lui-même.
+  pkill -P "$WATCHDOG_PID" >/dev/null 2>&1 || true
   kill "$WATCHDOG_PID" >/dev/null 2>&1 || true
   wait "$WATCHDOG_PID" 2>/dev/null || true
   WATCHDOG_PID=""
@@ -138,21 +185,23 @@ set +e
 "$DOCKER_BIN" run --rm --name "$CONTAINER_NAME" \
   --read-only \
   --tmpfs /tmp:rw,size=64m,noexec,nosuid \
-  --network="${COWORK_NET:-none}" \
+  --network="$DOCKER_NET" \
   --cap-drop=ALL \
   --security-opt no-new-privileges \
   --pids-limit=256 \
   --memory=1g \
   --memory-swap=1g \
   --cpus=1.0 \
-  --user 1000:1000 \
+  --user "$WORKSPACE_USER" \
   -i \
   -v "${COWORK_WORKSPACE}:/workspace:rw" \
   -w /workspace \
   -e COWORK_EXEC_MODEL \
+  -e ANTHROPIC_API_KEY \
   -e COWORK_API_KEY \
   -e GROQ_API_KEY \
   -e COWORK_SUBTASK_TIMEOUT \
+  ${PROXY_ENV[@]+"${PROXY_ENV[@]}"} \
   "$COWORK_SANDBOX_IMAGE"
 EXIT_CODE=$?
 set -e

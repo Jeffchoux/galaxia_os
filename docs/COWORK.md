@@ -160,25 +160,30 @@ sous-tâche peut casser se limite à un dossier `/workspace` éphémère.
 ```
 docker run --rm --name cowork-${SUBTASK_ID} \
   --read-only --tmpfs /tmp:rw,size=64m,noexec,nosuid \
-  --network=${COWORK_NET:-none} \
+  --network=${DOCKER_NET} \
   --cap-drop=ALL --security-opt no-new-privileges \
   --pids-limit=256 --memory=1g --memory-swap=1g --cpus=1.0 \
-  --user 1000:1000 -i \
+  --user $(stat -c '%u:%g' ${COWORK_WORKSPACE}) -i \
   -v ${COWORK_WORKSPACE}:/workspace:rw -w /workspace \
-  -e COWORK_EXEC_MODEL -e COWORK_API_KEY -e GROQ_API_KEY -e COWORK_SUBTASK_TIMEOUT \
+  -e COWORK_EXEC_MODEL -e ANTHROPIC_API_KEY -e COWORK_API_KEY -e GROQ_API_KEY -e COWORK_SUBTASK_TIMEOUT \
+  ${PROXY_ENV} \
   galaxia/cowork-sandbox
 ```
+
+où `DOCKER_NET` = `none` (mode `COWORK_NET=none`) **ou** le réseau interne
+`cowork-egress` (mode `COWORK_NET=egress`, défaut de la mère), et `PROXY_ENV`
+injecte alors `HTTPS_PROXY=http://cowork-proxy:8888` vers le proxy filtré.
 
 | Drapeau                              | Ce qu'il garantit                                                            |
 |--------------------------------------|------------------------------------------------------------------------------|
 | `--rm`                               | conteneur détruit en fin de course — rien ne survit                          |
 | `--read-only` + `--tmpfs /tmp`       | racine du conteneur en lecture seule ; seul `/tmp` (64 Mo, `noexec,nosuid`) et `/workspace` sont inscriptibles |
-| `--network=none` (défaut)            | **aucun réseau** ; `egress` seulement quand le risque le justifie (décidé par l'orchestrateur) |
+| `--network=cowork-egress` (mode egress, défaut mère) | réseau docker **interne** (sans NAT) ; seul chemin sortant = le **proxy filtré** `cowork-proxy` qui n'autorise que l'API du modèle (allowlist). `none` reste possible pour une sous-tâche sans appel modèle |
 | `--cap-drop=ALL`                     | aucune capability Linux                                                       |
 | `--security-opt no-new-privileges`   | pas d'escalade de privilèges (mime le durcissement systemd Galaxia)          |
 | `--pids-limit=256`                   | anti fork-bomb                                                                |
 | `--memory=1g --memory-swap=1g --cpus=1.0` | plafonds mémoire/CPU, pas de swap                                       |
-| `--user 1000:1000`                   | jamais root dans le conteneur                                                 |
+| `--user $(stat -c '%u:%g' …)`        | jamais root ; uid:gid = **propriétaire du workspace hôte** (l'utilisateur `galaxia`, uid variable — 1001 sur la mère ; surtout pas 1000 en dur) → accès rw garanti au bind-mount |
 | `-v …/workspace:/workspace:rw`       | **seul** montage hôte : le workspace de la sous-tâche, rien d'autre          |
 
 L'agent in-sandbox utilise `COWORK_EXEC_MODEL` (même défaut **gratuit/peu
@@ -284,6 +289,11 @@ sudo journalctl -u galaxia-cowork.service -f
 sudo systemctl restart galaxia-cowork.service
 # build de l'image sandbox (à faire une fois, et à republier pour les filles)
 # docker build -t galaxia/cowork-sandbox agents/cowork/sandbox/
+# build de l'image du proxy d'egress filtré
+# docker build -t galaxia/cowork-egress-proxy agents/cowork/egress-proxy/
+# proxy d'egress (réseau interne cowork-egress + allowlist api du modèle)
+sudo systemctl status galaxia-cowork-egress.service
+sudo journalctl -u galaxia-cowork-egress.service -f
 ```
 
 Diagnostic rapide :
@@ -297,12 +307,29 @@ Diagnostic rapide :
 
 ---
 
-## 10. Ce qui n'est PAS (encore) fait
+## 10. État d'activation (mère, 2026-05-31)
 
-- Le code est sur `feat/cockpit-cowork-autonomous`, **non mergé, non déployé**.
-- L'image `galaxia/cowork-sandbox` n'est pas buildée ; le service systemd
-  `galaxia-cowork.service` n'est pas installé.
-- **Aucune vérification de bout en bout** n'a encore eu lieu. L'intégration et
-  le build sont faits **par l'humain**, ultérieurement.
-- Le panneau cockpit (bouton « 🤝 Cowork » aujourd'hui désactivé dans
-  `+page.svelte`) reste à câbler sur ces routes/SSE.
+**Cowork est activé de bout en bout sur la mère.** L'egress des sous-tâches a été
+résolu en **egress filtré** (choix Jeff) plutôt qu'en `network=none` : l'agent
+in-sandbox a besoin de joindre l'API du modèle, incompatible avec un réseau coupé.
+
+Fait :
+
+- Code mergé sur `main` (orchestrateur, schéma, prompt, wrapper, routes API, UI).
+- Images buildées : `galaxia/cowork-sandbox` **et** `galaxia/cowork-egress-proxy`.
+- Réseau docker **interne** `cowork-egress` + service `galaxia-cowork-egress.service`
+  (tinyproxy, allowlist `api.anthropic.com` / `api.groq.com`).
+- Service `galaxia-cowork.service` installé, `COWORK_NET=egress`.
+- Deux correctifs trouvés en vérification e2e :
+  1. le wrapper transmet désormais `ANTHROPIC_API_KEY` au conteneur (la CLI le lit) ;
+  2. la sandbox tourne sous l'uid:gid **propriétaire du workspace** (galaxia = 1001
+     ici), pas un `1000` en dur — sinon `/workspace` est en `EACCES`.
+- Vérifié : filtrage egress (hôte hors allowlist → `403 Filtered`), et une
+  sous-tâche complète (écriture `/workspace` + sortie JSON) via le proxy.
+
+Reste (suivi) :
+
+- Packaging Hub & Spoke du proxy + du réseau interne pour les galaxies filles
+  (image `cowork-egress-proxy` + unit + création réseau via le mécanisme d'updates).
+- Egress par-sous-tâche modulé selon le risque (aujourd'hui : egress filtré pour
+  toutes ; `none` reste disponible par config).

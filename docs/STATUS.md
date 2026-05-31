@@ -1,7 +1,42 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **Cowork autonome mergé** (PR #34 — orchestrateur + sandbox Docker jetable par sous-tâche + routes API/SSE + DB + UI « 🤝 Cowork »), après résolution du conflit `STATUS.md` et validation build (`svelte-check` + `vite build`). **Pas encore déployé** (`systemctl restart galaxia-cockpit` + `systemctl enable --now galaxia-cowork` requis). Détail § « Cowork autonome » ci-dessous. Avant : **routeur de tâches souverain (mode « ✨ Auto »)** mergé (PR #33) + déployé — sélecteur 3 modes Auto/Rapide/Opus, routage local déterministe free vs Opus. Détail § « Routeur de tâches souverain » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **Cowork ACTIVÉ de bout en bout** sur la mère, en **egress filtré** (choix Jeff) : services `galaxia-cowork-egress` (proxy tinyproxy, allowlist `api.anthropic.com`/`api.groq.com`, réseau docker interne `cowork-egress`) + `galaxia-cowork` (orchestrateur) actifs. Cycle complet vérifié `plan → exécution sandboxée → synthèse → done`. **5 correctifs trouvés en vérification e2e** (cf. § « Cowork — activation »). **Avant : Cowork autonome mergé** (PR #34 — orchestrateur + sandbox Docker jetable par sous-tâche + routes API/SSE + DB + UI « 🤝 Cowork »), après résolution du conflit `STATUS.md` et validation build (`svelte-check` + `vite build`). Détail § « Cowork autonome » ci-dessous. Avant : **routeur de tâches souverain (mode « ✨ Auto »)** mergé (PR #33) + déployé — sélecteur 3 modes Auto/Rapide/Opus, routage local déterministe free vs Opus. Détail § « Routeur de tâches souverain » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Cowork — activation de bout en bout (egress filtré, 2026-05-31)
+
+Le chantier Cowork (mergé PR #34) est désormais **activé et vérifié de bout en
+bout sur la mère**. Le blocage de fond — la sandbox tournait en `network=none`,
+incompatible avec l'agent in-sandbox qui doit joindre l'API du modèle — a été
+résolu en **egress filtré** (choix Jeff) plutôt qu'en réseau coupé.
+
+**Ajouté :**
+- Image `galaxia/cowork-egress-proxy` (tinyproxy) + service
+  `galaxia-cowork-egress.service` : réseau docker **interne** `cowork-egress`
+  (sans NAT) dont le seul chemin sortant est le proxy, qui n'autorise que
+  `api.anthropic.com` / `api.groq.com` (allowlist). Vérifié : hôte hors liste →
+  `403 Filtered`.
+- Service `galaxia-cowork.service` installé et actif (`COWORK_NET=egress`,
+  `HOME`/`CLAUDE_CONFIG_DIR` → `/tmp` privé pour la CLI sous `ProtectHome`).
+
+**5 correctifs trouvés en vérification e2e (sinon Cowork ne tournait pas) :**
+1. le wrapper transmet `ANTHROPIC_API_KEY` au conteneur (la CLI le lit) ;
+2. la sandbox tourne sous l'uid:gid **propriétaire du workspace** (galaxia = 1001
+   ici), pas un `1000` codé en dur → sinon `/workspace` en `EACCES` ;
+3. les sous-tâches `mutating` sont runnables sans approbation (alignement
+   code↔doc ; seul `consequential` passe la porte) ;
+4. fuite du `sleep` du watchdog du wrapper qui gardait les pipes ouverts →
+   l'orchestrateur ne voyait jamais l'EOF, tâche bloquée en `running` à vie ;
+5. consigne du **protocole de sortie** (ligne JSON `{ok,summary}` finale) ajoutée
+   au prompt de sous-tâche, sinon l'agent rédigeait en prose sans sentinelle.
+
+**Vérifié :** cycle complet `plan → run (sandbox via proxy) → synthesize → done`
+(~30 s, ~$0.19), filtrage egress, écriture `/workspace`, sentinelle JSON, gate
+`awaiting_approval`. **Limites connues / suivi :** (a) un livrable de type
+**fichier** ne persiste pas (workspace éphémère ; seul le résumé JSON remonte) —
+la synthèse peut s'en trouver confuse ; (b) les run-dirs des workspaces ne sont
+pas nettoyés en fin de tâche (accumulation sous `~/.local/share/galaxia/cowork`) ;
+(c) packaging Hub & Spoke du proxy + réseau interne pour les filles à faire.
 
 ## Cowork autonome — orchestrateur + sandbox Docker (2026-05-31)
 

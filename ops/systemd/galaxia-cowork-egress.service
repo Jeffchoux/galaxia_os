@@ -1,0 +1,43 @@
+[Unit]
+Description=Galaxia — Cowork egress proxy (tinyproxy, allowlist api modèle)
+Documentation=https://github.com/Jeffchoux/galaxia_os/tree/main/agents/cowork/egress-proxy
+# Le proxy filtré donne aux bacs à sable Cowork leur SEUL chemin sortant, limité
+# aux hôtes de allowlist.filter. galaxia-cowork.service en dépend (Wants/After).
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=galaxia
+Group=galaxia
+
+# 1) Réseau INTERNE cowork-egress (sans NAT) : seul lien sandbox -> proxy. Créé
+#    idempotemment. 2) Retire un conteneur proxy résiduel (re-spawn après crash).
+ExecStartPre=/bin/sh -c 'docker network inspect cowork-egress >/dev/null 2>&1 || docker network create --internal cowork-egress'
+ExecStartPre=-/usr/bin/docker rm -f cowork-proxy
+
+# Démarre le proxy sur le réseau interne (pas d'Internet encore), au premier plan.
+# --user 65534:65534 (nobody:nogroup) : tinyproxy tourne non privilégié sans avoir
+# à faire lui-même un setuid/setgid (impossible sous --cap-drop=ALL).
+ExecStart=/usr/bin/docker run --rm --name cowork-proxy \
+  --network cowork-egress \
+  --user 65534:65534 \
+  --cap-drop=ALL --security-opt no-new-privileges \
+  --memory=128m --pids-limit=64 \
+  galaxia/cowork-egress-proxy
+
+# Donne au proxy son leg WAN (NAT via bridge) une fois le conteneur lancé. Boucle
+# bornée (~15 s) : si le proxy ne démarre pas, on échoue vite plutôt que de pendre.
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 30); do docker network connect bridge cowork-proxy 2>/dev/null && exit 0; sleep 0.5; done; echo "échec: cowork-proxy injoignable pour le leg WAN" >&2; exit 1'
+
+# Au stop, on retire le conteneur (--rm le fait, ceci est un filet).
+ExecStopPost=-/usr/bin/docker rm -f cowork-proxy
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
