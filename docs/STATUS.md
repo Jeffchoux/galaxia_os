@@ -1,7 +1,62 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **routeur de tâches souverain (mode « ✨ Auto », incrément 1 coder/chat)** : le sélecteur de modèle gagne un mode **Auto par défaut** qui choisit seul free (Groq, lecture) vs Opus (écriture/code/rédaction ou pièce jointe), 100 % local/déterministe, décision affichée pour rester transparent sur le coût. Build `svelte-check` 0 erreur + `vite build` OK. **Non déployé / non commité** (working tree). Détail § « Routeur de tâches souverain » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **Cowork autonome mergé** (PR #34 — orchestrateur + sandbox Docker jetable par sous-tâche + routes API/SSE + DB + UI « 🤝 Cowork »), après résolution du conflit `STATUS.md` et validation build (`svelte-check` + `vite build`). **Pas encore déployé** (`systemctl restart galaxia-cockpit` + `systemctl enable --now galaxia-cowork` requis). Détail § « Cowork autonome » ci-dessous. Avant : **routeur de tâches souverain (mode « ✨ Auto »)** mergé (PR #33) + déployé — sélecteur 3 modes Auto/Rapide/Opus, routage local déterministe free vs Opus. Détail § « Routeur de tâches souverain » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Cowork autonome — orchestrateur + sandbox Docker (2026-05-31)
+
+**Renversement assumé** de la décision « Cowork différé » du 2026-05-30 : Jeff
+a demandé ce jour de **construire** le mode Cowork autonome (cf.
+[`DECISIONS.md`](DECISIONS.md) entrée 2026-05-31). Architecture complète
+documentée dans [`COWORK.md`](COWORK.md).
+
+**Quoi :** le manager donne un **objectif** → l'orchestrateur **PLANIFIE**
+(décompose en un DAG de sous-tâches via le Claude Agent SDK, modèle gratuit par
+défaut) → **GATE d'approbation humaine** pour les sous-tâches `consequential`
+(irréversibles / hors sandbox) → **EXÉCUTE** chaque sous-tâche dans un
+conteneur Docker **jetable et isolé** → **SYNTHÉTISE** un livrable. Avancement
+streamé au cockpit en **SSE** (mêmes frames que le chat).
+
+**Construit sur cette branche (`feat/cockpit-cowork-autonomous`, worktree
+`/home/galaxia/cowork-build`) :**
+
+- **DB** (`apps/cockpit/src/lib/server/db.ts`) : tables `cowork_tasks` +
+  `cowork_subtasks` (CREATE IF NOT EXISTS via `ensureMigrated()`), helpers
+  CRUD + claims atomiques (`BEGIN IMMEDIATE`, mime `tasks.py`), approbation,
+  kill. Statuts figés : tâche `pending→planning→awaiting_approval→running→
+  synthesizing→done|error|killed`, sous-tâche `pending→blocked→
+  awaiting_approval→running→done|error|skipped|killed`, risque
+  `safe|mutating|consequential`.
+- **Routes API** (`apps/cockpit/src/routes/api/cowork/…`) : `POST`/`GET`
+  `/api/cowork`, `GET /api/cowork/[id]`, `GET /api/cowork/[id]/stream` (SSE),
+  `POST /api/cowork/[id]/approve`, `POST /api/cowork/[id]/kill`. Toutes scopées
+  `locals.user`.
+- **Orchestrateur** (`agents/cowork/orchestrator.mjs`) : démon unique à longue
+  durée de vie (cible : service `galaxia-cowork.service`), boucle
+  POLL→PLAN→GATE→EXECUTE→SYNTHESIZE, schéma Zod `CoworkPlanSchema` (DAG
+  acyclique par construction), plafond `COWORK_MAX_USD_PER_TASK`, kill-switch
+  via `docker kill`.
+- **Sandbox** (`agents/cowork/sandbox/run-subtask.sh` + image
+  `galaxia/cowork-sandbox`) : `docker run --rm --read-only --network=none
+  --cap-drop=ALL --security-opt no-new-privileges --user 1000:1000`, seul
+  `/workspace` monté ; prompt par STDIN, sortie ligne-par-ligne → SSE `log`,
+  dernière ligne = `{"ok",​"summary"}`.
+- **UI cockpit** (`apps/cockpit/src/routes/+page.svelte`) : panneau Cowork
+  câblé sur le bouton « 🤝 Cowork » jusqu'ici désactivé (sibling du panneau
+  mode Code).
+- **Doc** : `docs/COWORK.md` (neuf), maj `PRODUCT-VISION.md`, `DECISIONS.md`,
+  ce fichier.
+
+**Politique modèle respectée** : planner et exécution en **gratuit/peu cher par
+défaut** (`COWORK_PLANNER_MODEL` = `claude-sonnet-4-6`, `COWORK_EXEC_MODEL`
+sonnet/groq) ; Opus seulement sur escalade explicite.
+
+**Reste (humain, ultérieur) :** intégration & build (les agents écrivent le
+code seulement, pas de `git`/`npm`/`docker build`), build de l'image
+`galaxia/cowork-sandbox`, install du service systemd `galaxia-cowork.service`
+(gabarit durci `galaxia-coder.service`), **vérification de bout en bout** (rien
+n'est encore vérifié), puis merge de la branche et déploiement. Packaging Hub &
+Spoke pour les filles à suivre (image + service descendus par updates signées).
 
 ## Routeur de tâches souverain — mode « ✨ Auto » (2026-05-31, session root)
 

@@ -62,6 +62,54 @@ services:
       - cockpit
     profiles: ["pme"]
 
+  # Cowork — orchestrateur des tâches autonomes (plan -> approbation -> exécution
+  # en bacs à sable jetables -> synthèse). Daemon long : sonde la file
+  # cowork_tasks dans la même base SQLite que le cockpit (volume cockpit_data),
+  # et lance UN conteneur galaxia/cowork-sandbox par sous-tâche via le socket
+  # Docker de l'hôte (le wrapper run-subtask.sh fait `docker run`/`docker kill`).
+  #
+  # Sécurité : ce service a accès au socket Docker (== root sur l'hôte). C'est le
+  # même compromis que l'orchestrateur systemd (galaxia dans le groupe docker).
+  # Le durcissement réel est porté par les bacs à sable enfants (--read-only,
+  # --cap-drop=ALL, --network=none, user non privilégié), PAS par ce conteneur.
+  cowork-orchestrator:
+    <<: *galaxia-env
+    build:
+      context: ./agents/cowork
+      dockerfile: orchestrator.Dockerfile
+    image: galaxia/cowork-orchestrator:latest
+    restart: unless-stopped
+    environment:
+      COWORK_DB_PATH: /cockpit_data/cockpit.db
+      # Identité de chemin hôte↔conteneur OBLIGATOIRE : l'orchestrateur tourne DANS
+      # un conteneur mais lance des bacs à sable frères via le socket Docker de
+      # l'HÔTE. `docker run -v ${COWORK_WORKSPACE}:/workspace` résout la source sur
+      # l'HÔTE → COWORK_RUN_DIR doit pointer le MÊME chemin absolu des deux côtés
+      # (bind ci-dessous), pas un volume nommé (dont le mountpoint hôte diffère).
+      COWORK_RUN_DIR: ${COWORK_RUN_DIR:-/home/galaxia/.local/share/galaxia/cowork}
+      # Modèles FREE par défaut (politique modèle : Opus seulement sur escalade).
+      COWORK_PLANNER_MODEL: ${COWORK_PLANNER_MODEL:-claude-sonnet-4-6}
+      COWORK_EXEC_MODEL: ${COWORK_EXEC_MODEL:-claude-sonnet-4-6}
+      COWORK_MAX_USD_PER_TASK: ${COWORK_MAX_USD_PER_TASK:-1.00}
+      COWORK_POLL_SEC: ${COWORK_POLL_SEC:-3}
+      COWORK_MAX_CONCURRENCY: ${COWORK_MAX_CONCURRENCY:-2}
+      COWORK_SANDBOX_IMAGE: galaxia/cowork-sandbox
+    volumes:
+      # Base partagée avec le cockpit (cowork_tasks/cowork_subtasks).
+      - cockpit_data:/cockpit_data
+      # Run dirs + workspaces des sous-tâches : BIND au MÊME chemin absolu hôte et
+      # conteneur (cf. COWORK_RUN_DIR ci-dessus) pour que les binds `-v` des bacs à
+      # sable frères, résolus sur l'hôte, pointent bien sur ces workspaces.
+      - ${COWORK_RUN_DIR:-/home/galaxia/.local/share/galaxia/cowork}:${COWORK_RUN_DIR:-/home/galaxia/.local/share/galaxia/cowork}
+      # Socket Docker : indispensable pour lancer les bacs à sable jetables.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Construire l'image du bac à sable est délégué à l'humain (cf. README) ;
+    # on la déclare ici pour documenter la dépendance d'image, mais Compose ne
+    # build pas une image juste parce qu'un autre service la référence en `-v`.
+    depends_on:
+      - cockpit
+    profiles: ["pme"]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -92,3 +140,6 @@ volumes:
   bot_data:
   caddy_data:
   caddy_config:
+  # (Pas de volume nommé pour Cowork : les run dirs sont un BIND au même chemin
+  #  absolu hôte↔conteneur — cf. service cowork-orchestrator — condition pour que
+  #  les binds des bacs à sable frères résolvent un chemin hôte valide.)
