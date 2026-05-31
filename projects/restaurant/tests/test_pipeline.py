@@ -272,6 +272,31 @@ class OverpassDiscovery(unittest.TestCase):
             discovery._overpass_fetch = orig
             conn.close()
 
+    def test_query_sanitizes_quotes_in_city(self):
+        # un nom de ville avec guillemets ne doit pas casser/échapper la requête QL
+        q = discovery._overpass_query('Saint-"X"', "restaurant")
+        self.assertNotIn('"X"', q)
+        self.assertIn('"name"="Saint-X"', q)
+
+    def test_dedup_skips_repeated_osm_id(self):
+        # deux fois le même way/2 -> une seule insertion (seen_ext)
+        sample = {"elements": [
+            self.SAMPLE["elements"][1],
+            {"type": "way", "id": 2, "center": {"lat": 47.40, "lon": 0.70},
+             "tags": {"name": "Resto Way (doublon)", "amenity": "restaurant"}},
+        ]}
+        cfg = self._temp_cfg()
+        cfg["discovery"].update(cities=["Tours"], max_per_run=20, request_delay_ms=0)
+        orig = discovery._overpass_fetch
+        discovery._overpass_fetch = lambda q, c: sample
+        conn = db.connect(cfg)
+        try:
+            ids = discovery._discover_from_overpass(conn, cfg)
+            self.assertEqual(len(ids), 1)  # le doublon way/2 est écarté
+        finally:
+            discovery._overpass_fetch = orig
+            conn.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
