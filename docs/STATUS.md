@@ -1,7 +1,32 @@
 # Galaxia — état du projet
 
 > **Doc vivante.** Mise à jour à chaque fin de session ou changement d'état.
-> Dernière révision : **2026-05-31** — **projet « restaurant » : enrichissement de contenu Ollama branché (étape autonome n°1)**. `content.py` peut désormais reformuler le **texte neutre** de présentation via Ollama local (`llm.py`, souverain, 0 €), **désactivé par défaut** (`llm.content_enrichment: false`), avec un **garde-fou « aucun fait inventé »** (rejet de tout chiffre/superlatif/distinction hallucinés → repli déterministe) et **traçage du coût (0 €) dans `agent_runs`**. Toujours **Anneau 0 (dry-run total)**. 17 tests verts (12 → 17). Détail § « Restaurant — enrichissement Ollama » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+> Dernière révision : **2026-05-31** — **projet « restaurant » : découverte OSM/Overpass branchée (étape autonome n°2)**. `discovery.py` interroge désormais l'API Overpass en **LECTURE SEULE** (OpenStreetMap, **ODbL** avec attribution tracée), **opt-in** (`discovery.live: false` par défaut → fixtures, tests/dry-run hermétiques), bornée (cap par run, espacement, User-Agent honnête, backoff sur quota), jeu de champs **minimal** (RGPD). Vérifié en réel sur **Tours** (5 fiches, cap respecté). 22 tests verts (17 → 22). Détail § « Restaurant — découverte Overpass » ci-dessous. Avant : **enrichissement de contenu Ollama branché (étape autonome n°1)**. `content.py` peut désormais reformuler le **texte neutre** de présentation via Ollama local (`llm.py`, souverain, 0 €), **désactivé par défaut** (`llm.content_enrichment: false`), avec un **garde-fou « aucun fait inventé »** (rejet de tout chiffre/superlatif/distinction hallucinés → repli déterministe) et **traçage du coût (0 €) dans `agent_runs`**. Toujours **Anneau 0 (dry-run total)**. 17 tests verts (12 → 17). Détail § « Restaurant — enrichissement Ollama » ci-dessous. Avant : **le bot Telegram transcrit désormais les messages vocaux / fichiers audio / notes vidéo** (Whisper local) puis route le texte transcrit comme un message normal (ordre `/do` ou conversation). Déployé (restart `galaxia-bot` 02:39 UTC). Détail § « Vocaux Telegram → transcription » ci-dessous. Avant : **le chat gratuit (Groq) a désormais l'accès LECTURE au projet + le sélecteur de modèle est rendu visible** dans la barre de saisie. Build OK, **déployé** (restart 19:47 UTC). Détail § « Chat gratuit outillé » ci-dessous. Avant : bascule du thème cockpit en CLAIR + accent terracotta (« copie conforme Claude »), **déployé** (restart 19:32 UTC). ⚠️ **Renversement assumé** de la décision « identité violette distincte de Claude » du 2026-05-29 — choix Jeff explicite ce jour. Avant : Galaxia 2.0 increments 1-3 (design system + 3 panneaux + Projets WS3 + Vue Code WS4 + coloration syntaxique). Sprint 3 (Voix Jarvis) toujours en cours — détail dans [`DECISIONS.md`](DECISIONS.md) § D6.
+
+## Restaurant — découverte Overpass (2026-05-31, session root)
+
+**Étape autonome n°2** du plan `docs/09 §6` (« découverte Overpass en lecture seule,
+rate-limitée, attribution ODbL, testée sur une ville en dry-run »), réalisée sans
+intervention humaine, **toujours en Anneau 0**.
+
+**Livré (22 tests verts ; vérifié en réel sur Tours) :**
+- **`pipeline/discovery.py`** : `_discover_from_overpass()` interroge l'API Overpass
+  (`node`+`way["amenity"="restaurant"]` par ville, `out center tags`) en **stdlib `urllib`**.
+  **Lecture seule licite**, donc découplée du garde-fou d'envoi `dry_run` ; gouvernée par un
+  **opt-in dédié** `discovery.live` (défaut **false** → fixtures, donc tests + dry-run
+  restent **hermétiques, zéro réseau**). Bornée : cap `max_per_run`, **espacement** entre
+  villes, **User-Agent honnête**, **backoff** sur 429/504, et toute source en panne →
+  `overpass_unavailable` loggé, le pipeline **continue** (ne casse pas).
+- **Champs MINIMAUX** (docs/03 §3) : name/category/addr*/lat-lon/phone/email/website +
+  `external_id` OSM ; `email_is_generic` dérivé (verrou légal). **Provenance ODbL** tracée
+  par enregistrement (`data_source='osm-overpass'`, `source_url` permalink OSM,
+  `attribution` + `audit_log` `collected_osm`).
+- **`config/default.yaml`** : `discovery.live: false`, `overpass_url`, `request_timeout_ms`.
+- **Tests** : +5 (17 → 22) — parsing node/way/center, e-mail générique vs nominatif, élément
+  sans nom ignoré, routage opt-in (live false → fixtures sans réseau), insert+dédup+cap,
+  source indisponible sans crash. **Smoke live réel** : Tours → 5 fiches, cap respecté.
+
+**Suite (étape n°3)** : audit HTTP **SSRF-safe** du site existant + scoring réel (docs/01 §11).
 
 ## Restaurant — enrichissement Ollama (2026-05-31, session root)
 

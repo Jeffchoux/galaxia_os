@@ -32,7 +32,9 @@ paths:
 
 # --- Découverte ------------------------------------------------------------
 discovery:
-  source: osm-overpass          # source primaire licite (ODbL) — fixtures en dry-run
+  source: osm-overpass          # source primaire licite (ODbL)
+  live: false                   # opt-in réseau : false => fixtures (tests/dry-run hermétiques)
+  overpass_url: "https://overpass-api.de/api/interpreter"
   amenity: restaurant
   cities:
     - Tours
@@ -40,6 +42,7 @@ discovery:
   max_per_run: 20               # plafond par exécution (rate limit)
   user_agent: "GalaxiaBot/1.0 (+https://galaxia-os.com/bot)"
   request_delay_ms: 1500        # politesse entre requêtes source
+  request_timeout_ms: 30000     # timeout par requête Overpass
 
 # --- Audit de site (SSRF-safe) ---------------------------------------------
 audit:

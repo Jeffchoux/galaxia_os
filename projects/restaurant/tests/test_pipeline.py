@@ -13,6 +13,7 @@ Lancer :  python -m unittest discover -s tests   (depuis projects/restaurant/)
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -181,6 +182,95 @@ class ContentEnrichment(unittest.TestCase):
         self.assertFalse(res["ok"])
         self.assertEqual(res["cost_usd"], 0.0)
         self.assertEqual(res["text"], "")
+
+
+class OverpassDiscovery(unittest.TestCase):
+    """Découverte OSM/Overpass — parsing, routage opt-in, rate-limit, sans réseau ici."""
+
+    SAMPLE = {
+        "elements": [
+            {"type": "node", "id": 1, "lat": 47.39, "lon": 0.69,
+             "tags": {"name": "Resto Node", "amenity": "restaurant",
+                      "addr:housenumber": "12", "addr:street": "rue Tests",
+                      "addr:city": "Tours", "addr:postcode": "37000",
+                      "contact:email": "contact@resto-node.fr",
+                      "website": "http://resto-node.fr", "phone": "0247000000"}},
+            {"type": "way", "id": 2, "center": {"lat": 47.40, "lon": 0.70},
+             "tags": {"name": "Resto Way", "amenity": "restaurant",
+                      "email": "jean.dupont@resto-way.fr"}},  # nominatif -> generic=0
+            {"type": "node", "id": 3, "lat": 47.41, "lon": 0.71,
+             "tags": {"amenity": "restaurant"}},  # sans nom -> ignoré
+        ]
+    }
+
+    def _temp_cfg(self):
+        cfg = config.load_config()
+        tmp = tempfile.mkdtemp(prefix="resto-test-")
+        cfg.setdefault("paths", {})["database"] = str(Path(tmp) / "t.db")
+        db.init_db(cfg)
+        return cfg
+
+    def test_parse_element_minimal_fields(self):
+        rec = discovery._parse_element(self.SAMPLE["elements"][0])
+        self.assertEqual(rec["external_id"], "node/1")
+        self.assertEqual(rec["address"], "12 rue Tests")
+        self.assertEqual(rec["data_source"], "osm-overpass")
+        self.assertIn("openstreetmap.org/node/1", rec["source_url"])
+        self.assertEqual(rec["email_is_generic"], 1)       # contact@ -> générique
+        self.assertEqual(rec["attribution"], discovery.ODBL_ATTRIBUTION)
+        # way -> géométrie depuis center, e-mail nominatif -> non générique
+        way = discovery._parse_element(self.SAMPLE["elements"][1])
+        self.assertEqual((way["lat"], way["lon"]), (47.40, 0.70))
+        self.assertEqual(way["email_is_generic"], 0)
+        # sans nom -> None
+        self.assertIsNone(discovery._parse_element(self.SAMPLE["elements"][2]))
+
+    def test_query_targets_amenity_and_city(self):
+        q = discovery._overpass_query("Tours", "restaurant")
+        self.assertIn('"amenity"="restaurant"', q)
+        self.assertIn('"name"="Tours"', q)
+        self.assertIn("out center tags", q)
+
+    def test_routing_opt_in(self):
+        orig_fx, orig_op = discovery._discover_from_fixtures, discovery._discover_from_overpass
+        discovery._discover_from_fixtures = lambda conn, cfg: ["FX"]
+        discovery._discover_from_overpass = lambda conn, cfg: ["OP"]
+        try:
+            cfg = {"discovery": {"source": "osm-overpass", "live": False}}
+            self.assertEqual(discovery.discover(None, cfg), ["FX"])  # défaut = fixtures
+            cfg["discovery"]["live"] = True
+            self.assertEqual(discovery.discover(None, cfg), ["OP"])  # opt-in = overpass
+        finally:
+            discovery._discover_from_fixtures = orig_fx
+            discovery._discover_from_overpass = orig_op
+
+    def test_overpass_inserts_dedups_and_caps(self):
+        cfg = self._temp_cfg()
+        cfg["discovery"].update(cities=["Tours"], max_per_run=1, request_delay_ms=0)
+        orig = discovery._overpass_fetch
+        discovery._overpass_fetch = lambda q, c: self.SAMPLE
+        conn = db.connect(cfg)
+        try:
+            ids = discovery._discover_from_overpass(conn, cfg)
+            self.assertEqual(len(ids), 1)  # cap respecté
+            row = conn.execute("SELECT data_source, source_url FROM businesses WHERE id=?",
+                               (ids[0],)).fetchone()
+            self.assertEqual(row["data_source"], "osm-overpass")
+        finally:
+            discovery._overpass_fetch = orig
+            conn.close()
+
+    def test_overpass_unavailable_does_not_crash(self):
+        cfg = self._temp_cfg()
+        cfg["discovery"].update(cities=["Tours"], request_delay_ms=0)
+        orig = discovery._overpass_fetch
+        discovery._overpass_fetch = lambda q, c: None  # quota/panne
+        conn = db.connect(cfg)
+        try:
+            self.assertEqual(discovery._discover_from_overpass(conn, cfg), [])
+        finally:
+            discovery._overpass_fetch = orig
+            conn.close()
 
 
 if __name__ == "__main__":
