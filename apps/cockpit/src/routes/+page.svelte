@@ -106,11 +106,17 @@
 	// Firefox et est partiel sur Safari. Whisper local marche partout via getUserMedia.
 	let sttBackend = $state<'browser' | 'whisper'>('whisper');
 
-	// Modèle du chat (choix Jeff 2026-05-29) :
-	// - 'free' (défaut) : LLM gratuit (Groq), chat nu, pour les petites tâches.
-	// - 'pro'  : Opus 4.8 + outils, pour coder/améliorer Galaxia + la com de Jeff.
+	// Modèle du chat :
+	// - 'auto' (défaut) : routeur souverain — Galaxia choisit seule free vs Opus
+	//   selon la nature de la demande (gratuit par défaut, Opus seulement si
+	//   tâche technique/rédaction ou pièce jointe). La décision s'affiche.
+	// - 'free' : force le LLM gratuit (Groq), accès LECTURE au projet.
+	// - 'pro'  : force Opus 4.8 + outils, pour coder/améliorer Galaxia + la com.
 	// Persisté en localStorage : le dernier choix est conservé entre sessions.
-	let chatMode = $state<'pro' | 'free'>('free');
+	let chatMode = $state<'pro' | 'free' | 'auto'>('auto');
+	// Dernière décision du routeur (mode auto) — affichée pour rester transparent
+	// sur le moteur retenu et son coût. Réinitialisée à chaque nouvel envoi.
+	let routeNote = $state<{ engine: 'free' | 'pro'; reason: string } | null>(null);
 
 	// ─── Projets (WS3) — regroupement des conversations façon Claude Code ───
 	type Project = { id: string; name: string };
@@ -232,7 +238,7 @@
 			const sb = localStorage.getItem('galaxia.sttBackend');
 			if (sb === 'browser' || sb === 'whisper') sttBackend = sb;
 			const cm = localStorage.getItem('galaxia.chatMode');
-			if (cm === 'pro' || cm === 'free') chatMode = cm;
+			if (cm === 'pro' || cm === 'free' || cm === 'auto') chatMode = cm;
 			codeWrap = localStorage.getItem('galaxia.codeWrap') === '1';
 			const cp = localStorage.getItem('galaxia.collapsedProjects');
 			if (cp) collapsedProjects = new Set(JSON.parse(cp) as string[]);
@@ -785,6 +791,7 @@
 		if (!text || sending) return;
 		draft = '';
 		errorMsg = null;
+		routeNote = null;
 		sending = true;
 		stopSpeaking(); // au cas où Galaxia parlait encore d'avant
 		ttsBuffer = '';
@@ -862,6 +869,8 @@
 			input?: Record<string, unknown>;
 			result?: string;
 			is_error?: boolean;
+			engine?: 'free' | 'pro';
+			reason?: string;
 		};
 		try {
 			data = JSON.parse(dataStr);
@@ -872,6 +881,10 @@
 		if (event === 'conversation' && data.id) {
 			conversationId = data.id;
 			history.replaceState({}, '', `/?c=${data.id}`);
+		} else if (event === 'routing' && data.engine) {
+			// Décision du routeur souverain (mode auto) : on l'affiche pour rester
+			// transparent sur le moteur retenu (et donc le coût) du tour courant.
+			routeNote = { engine: data.engine, reason: data.reason ?? '' };
 		} else if (event === 'delta' && data.text && streamingIndex !== null) {
 			const t = turns[streamingIndex];
 			turns[streamingIndex] = {
@@ -1572,6 +1585,13 @@
 			{/if}
 		</section>
 
+		{#if chatMode === 'auto' && routeNote}
+			<div class="route-note" class:pro={routeNote.engine === 'pro'}>
+				✨ Auto → {routeNote.engine === 'pro' ? '🧠 Opus' : '⚡ Rapide'}
+				<span class="rn-reason">· {routeNote.reason}</span>
+			</div>
+		{/if}
+
 		<div
 			class="composer-wrap"
 			class:drag={dragOver}
@@ -1676,10 +1696,27 @@
 						disabled={sending}
 						aria-haspopup="menu"
 						aria-expanded={modelOpen}
-						title="Choisir le modèle : Rapide (gratuit, accès lecture au projet) ou Opus 4.8 (complet, peut coder)"
-					>{chatMode === 'pro' ? '🧠 Opus' : '⚡ Rapide'}</button>
+						title="Choisir le modèle : Auto (Galaxia décide), Rapide (gratuit, lecture) ou Opus 4.8 (complet, peut coder)"
+					>{chatMode === 'pro' ? '🧠 Opus' : chatMode === 'free' ? '⚡ Rapide' : '✨ Auto'}</button>
 					{#if modelOpen}
 						<div class="menu" role="menu">
+							<button
+								type="button"
+								class="menu-item"
+								role="menuitemradio"
+								aria-checked={chatMode === 'auto'}
+								onclick={() => {
+									chatMode = 'auto';
+									modelOpen = false;
+								}}
+							>
+								<span class="mi-ico">✨</span>
+								<span class="mi-body">
+									<span class="mi-title">Auto — Galaxia décide</span>
+									<span class="mi-sub">Gratuit par défaut, Opus seulement si la tâche le justifie (code, rédaction, pièce jointe).</span>
+								</span>
+								{#if chatMode === 'auto'}<span class="mi-check">✓</span>{/if}
+							</button>
 							<button
 								type="button"
 								class="menu-item"
@@ -2616,6 +2653,22 @@
 		border-radius: 6px;
 		color: var(--g-state-error);
 		font-size: 0.875rem;
+	}
+
+	.route-note {
+		max-width: 800px;
+		margin: 0 auto 0.35rem;
+		padding: 0.2rem 0.6rem;
+		font-size: 0.78rem;
+		color: var(--g-fg-muted, #6b6b6b);
+		opacity: 0.85;
+	}
+	.route-note.pro {
+		color: var(--g-primary);
+		opacity: 1;
+	}
+	.route-note .rn-reason {
+		opacity: 0.7;
 	}
 
 	.composer {
