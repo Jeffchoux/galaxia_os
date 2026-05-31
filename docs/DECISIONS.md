@@ -339,6 +339,7 @@ l'humain). Voir [`STATUS.md`](STATUS.md) § « Cowork autonome » et
 
 **Posée le :** 2026-05-28
 **Tranchée le :** 2026-05-31
+**Provisionnée & vérifiée le :** 2026-05-31
 **Réponse de Jeff** : sous-domaine de `galaxia-os.com` + **Scaleway TEM**.
 
 **Décision** :
@@ -352,18 +353,19 @@ l'humain). Voir [`STATUS.md`](STATUS.md) § « Cowork autonome » et
   gratuit (300 mails/mois, puis 0,25 €/1000) ; **IP dédiée via le plan Scale**
   quand le volume le justifiera, pour maîtriser warm-up et réputation.
 
-**Conséquences (à venir — TOUJOURS en dry-run tant que 15.2 / 15.4 non tranchées)** :
-- DNS : poser **SPF + DKIM + DMARC** sur le sous-domaine d'envoi (zone
-  `galaxia-os.com`).
-- Secrets : clé API Scaleway TEM dans `/opt/galaxia/config/.env` (jamais committée).
-- Intégration : l'`email_agent` cible ce sous-domaine + l'API Scaleway, mais reste
-  `send_enabled:false` (aucun envoi réel) jusqu'à 15.2 (base légale) et 15.4
-  (adresse postale).
+**Provisionnement — FAIT le 2026-05-31** (infra prête ; TOUJOURS en dry-run tant
+que 15.2 / 15.4 non tranchées) :
+- ✅ Compte Scaleway créé par Jeff + **clé API TEM** rangée dans
+  `/opt/galaxia/config/.env` (`SCW_ACCESS_KEY`, `SCW_SECRET_KEY`,
+  `SCW_DEFAULT_REGION=fr-par`, `SCW_DEFAULT_PROJECT_ID=c34acb1f-…`). Jamais
+  committée. À rotater (a transité en clair). Expire 2027-05-31.
+- ✅ Domaine d'envoi `mail.galaxia-os.com` déclaré dans TEM (domain id
+  `8f719178-…`) ; **SPF + DKIM + DMARC + MX posés chez OVH** et domaine
+  **`checked` / vérifié** par Scaleway (réputation initiale 100/100).
+- ⏭️ **Reste à coder** : brancher l'`email_agent` sur l'API TEM (endpoint
+  `transactional-email/v1alpha1/regions/fr-par/.../emails`), en **gardant
+  `send_enabled:false`** — aucun envoi réel tant que 15.2 (base légale) et 15.4
+  (adresse postale) ne sont pas réglées.
 
-**Reste côté Jeff pour activer concrètement** :
-- Créer le **compte Scaleway** (facturation) + générer une **clé API TEM**.
-- Donner accès à la **zone DNS de `galaxia-os.com`** (ou poser les 3
-  enregistrements que je fournirai).
-
-**Toujours ouvert dans §15** : 15.2 (base légale), 15.3 (Stripe), 15.4 (adresse
-postale).
+**Toujours ouvert dans §15 (conditions de l'envoi réel)** : 15.2 (base légale),
+15.3 (Stripe), 15.4 (adresse postale).

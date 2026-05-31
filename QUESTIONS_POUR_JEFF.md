@@ -298,13 +298,13 @@ dry-run. Je continue seul tout le travail interne (Ollama, découverte OSM en le
 worker 24/7, page de désinscription). **Mais 4 décisions te reviennent** car ce sont des
 risques juridiques / financiers / de réputation — je ne les prends pas seul :
 
-**15.1 — Envoi d'e-mail : domaine + prestataire. ✅ TRANCHÉE le 2026-05-31.**
-Choix de Jeff : **sous-domaine dédié de `galaxia-os.com`** (proposé `mail.galaxia-os.com`,
-jamais `app.galaxia-os.com`) + **Scaleway TEM** (transactionnel souverain `fr-par`, IP
-dédiée via plan Scale au besoin). Détail et suites dans
-[`docs/DECISIONS.md`](docs/DECISIONS.md) § « 2026-05-31 — Q15.1 ». Reste côté Jeff pour
-activer : créer le compte Scaleway + clé API TEM, et donner accès à la zone DNS pour poser
-SPF/DKIM/DMARC.
+**15.1 — Envoi d'e-mail : domaine + prestataire. ✅ TRANCHÉE + PROVISIONNÉE le 2026-05-31.**
+Choix de Jeff : **sous-domaine dédié `mail.galaxia-os.com`** (jamais `app.galaxia-os.com`)
++ **Scaleway TEM** (transactionnel souverain `fr-par`, IP dédiée via plan Scale au besoin).
+**Infra prête** : clé API rangée dans `/opt/galaxia/config/.env` (`SCW_*`), DNS
+SPF/DKIM/DMARC/MX posés chez OVH, domaine **vérifié** (`checked`) côté Scaleway. Détail dans
+[`docs/DECISIONS.md`](docs/DECISIONS.md) § « 2026-05-31 — Q15.1 ». **Plus rien à faire ici** ;
+l'envoi reste `send_enabled:false` tant que 15.2 et 15.4 ne sont pas réglées.
 
 **15.2 — Base légale prospection B2B.** Je ne contacte que des adresses **génériques**
 (`contact@`, `info@`) de restaurants, base « intérêt légitime », opt-out 1 clic — conforme
