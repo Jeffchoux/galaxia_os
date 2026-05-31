@@ -369,3 +369,26 @@ que 15.2 / 15.4 non tranchées) :
 
 **Toujours ouvert dans §15 (conditions de l'envoi réel)** : 15.2 (base légale),
 15.3 (Stripe), 15.4 (adresse postale).
+
+---
+
+## 2026-05-31 — Q15.4 : adresse postale de l'expéditeur
+
+**Posée le :** 2026-05-28
+**Tranchée le :** 2026-05-31
+**Réponse de Jeff** : **27 rue Dombasle, 75015 Paris, France**.
+
+**Décision** : adresse postale physique de l'expéditeur (obligation légale dans
+tout e-mail commercial) = **27 rue Dombasle, 75015 Paris, France**.
+
+**Conséquence dans le code** :
+- `projects/restaurant/config/default.yaml` → `email.sender_postal_address:
+  "Galaxia — 27 rue Dombasle, 75015 Paris, France"`. Alimente le placeholder
+  `{{SENDER_POSTAL_ADDRESS}}` du pied d'e-mail, dont l'absence fait bloquer
+  l'e-mail par les agents `compliance` et `qa`.
+
+**Effet sur §15** : les conditions *légales* d'un envoi réel sont désormais
+réunies (15.1 domaine authentifié + 15.4 adresse + 15.2 base légale par défaut +
+opt-out). **`send_enabled` reste néanmoins `false`** : l'envoi réel exige un GO
+explicite de Jeff, le branchement `email_agent`↔Scaleway et un warm-up. 15.3
+(Stripe) reste requis pour la facturation.
