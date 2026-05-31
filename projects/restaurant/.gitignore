@@ -2,10 +2,15 @@
 # (Le site d'exemple sous sites/ et les e-mails d'exemple sous logs/dry_run_emails/
 #  SONT versionnés volontairement comme livrables de démonstration.)
 
-# Base SQLite et journaux WAL
-data/*.db
-data/*.db-wal
-data/*.db-shm
+# Données du projet : la base SQLite et les WAL restent locaux (non versionnés),
+# mais la donnée de démo FICTIVE du dry-run (data/fixtures.json — domaines RFC2606
+# example.*, aucune vraie PME/PII) EST versionnée : sans elle la suite de tests
+# dry-run ne tourne pas sur un clone neuf (FileNotFoundError). Le .gitignore racine
+# ignore tout `data/`, donc on ré-inclut le dossier, on ignore son contenu, puis on
+# ré-autorise le seul fixtures.json.
+!/data/
+/data/*
+!/data/fixtures.json
 
 # Surcharge de config locale (peut contenir des secrets) — JAMAIS committée
 config/local.yaml
