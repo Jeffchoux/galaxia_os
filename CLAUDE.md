@@ -69,6 +69,26 @@ Format court, anglais, conventional-ish (`area: short description`). Exemples :
 
 Toujours signer avec `Co-Authored-By: Claude Opus 4.7 ...` quand Claude Code commit.
 
+### Travail concurrent — anti-doublon (IMPORTANT)
+
+Ce dépôt est travaillé par **plusieurs agents autonomes en même temps** (le coder
+quotidien, l'orchestrateur Cowork, le worker Telegram, plus les sessions Claude
+interactives). Les **PRs/branches jumelles pour la même tâche** sont le mode d'échec
+le plus fréquent (vu le 2026-05-31 : 4 PRs pour un seul changement).
+
+Avant d'ouvrir une PR **ou** de commencer une tâche de code :
+
+1. `git fetch origin` puis vérifier que le travail n'est **pas déjà dans `origin/main`**
+   (`git log --oneline origin/main`, `git show origin/main:<fichier>`).
+2. `gh pr list --state all` — une PR (la tienne d'un run précédent, ou celle d'un autre
+   agent) couvre peut-être déjà le sujet.
+3. Si c'est déjà mergé ou qu'une PR équivalente est ouverte : **ne pas créer de jumelle**,
+   passer à autre chose et noter la raison.
+
+Le worktree `/home/galaxia/galaxia-project` est partagé : des changements « non commités »
+ou des bascules de branche peuvent venir d'un autre agent. Vérifier `git status` /
+`git log` avant de commit/discard ; ne jamais jeter l'in-progress d'un autre agent.
+
 ### Bash
 
 - `set -euo pipefail` en tête de tout script

@@ -30,7 +30,8 @@ Your audience for every PR you open is **Jeff**, a manager (not a developer). PR
 6. **Respect existing conventions.** Before adopting a style choice (logging, error formatting, French vs English, file layout), read at least one nearby existing file. `CLAUDE.md` is the canonical source of truth on conventions.
 7. **Do not invent dependencies.** No `npm install` unless the repo already declares that dependency. Adding a new dependency is a separate, justified PR — open an issue for discussion instead.
 8. **Never commit secrets**, even synthetic-looking ones. Never echo a value that came from an env var into a file you commit.
-9. **Be token-efficient** (see the next section).
+9. **Never duplicate work that's already done or in flight.** This repo is worked by **several autonomous agents at once** (this coder, the Cowork orchestrator, the Telegram worker) — twin PRs for the same change are the single most common failure. Before starting a proposal: `git fetch origin`, confirm the change is **not already in `origin/main`** (`git log --oneline origin/main`, `git show origin/main:<file>`), and run `gh pr list --state all` to check no PR (yours or another agent's) already covers it. If it's merged, or an equivalent PR is already open, **skip the proposal** and record the reason — do not open a twin.
+10. **Be token-efficient** (see the next section).
 
 ## Token economics
 
@@ -59,14 +60,15 @@ Reject:
 
 For each of the 1–3 chosen items:
 
-1. Sketch the change mentally: which file, what diff, why it matters.
-2. `git switch -c coder/<date>-<slug>` (from `main`).
-3. Read first, edit second. Verify the result with `git diff`.
-4. If `git status` is empty → abandon this proposal, record the reason.
-5. `git add` only the files you actually changed. Commit with a Conventional Commits message and the `Co-Authored-By` trailer. Commits will sign automatically if a GPG key is configured.
-6. `git push -u origin <branch>`.
-7. `gh pr create --base main --title "..." --body "..." --label coder`. Capture the URL.
-8. `git switch main` before moving to the next proposal.
+1. **Dedup check first (rule 9).** `git fetch origin`, then verify the change isn't already in `origin/main` and that no twin PR exists (`gh pr list --state all`). If it's already merged or an equivalent PR is open, skip this proposal and record why — never open a twin.
+2. Sketch the change mentally: which file, what diff, why it matters.
+3. `git switch -c coder/<date>-<slug>` (from `main`).
+4. Read first, edit second. Verify the result with `git diff`.
+5. If `git status` is empty → abandon this proposal, record the reason.
+6. `git add` only the files you actually changed. Commit with a Conventional Commits message and the `Co-Authored-By` trailer. Commits will sign automatically if a GPG key is configured.
+7. `git push -u origin <branch>`.
+8. `gh pr create --base main --title "..." --body "..." --label coder`. Capture the URL.
+9. `git switch main` before moving to the next proposal.
 
 If any step fails (push rejected, gh auth missing, etc.): record the failure in the report and move on. Do not retry indefinitely.
 
