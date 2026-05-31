@@ -73,6 +73,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=logging.INFO,
 )
+# Sécurité : httpx/httpcore logguent chaque requête HTTP en INFO. Or les URLs de
+# l'API Telegram contiennent le token du bot (api.telegram.org/bot<TOKEN>/...), qui
+# se retrouvait donc en clair dans journald (72k+ lignes). On fait taire ces loggers
+# (WARNING) pour ne JAMAIS écrire le token dans les logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger("galaxia-bot")
 
 
